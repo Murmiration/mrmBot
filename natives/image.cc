@@ -14,6 +14,7 @@
 #include "globe.h"
 #include "homebrew.h"
 #include "invert.h"
+#include "jjos.h"
 #include "jpeg.h"
 #include "magik.h"
 #include "meme.h"
@@ -28,6 +29,8 @@
 #include "speed.h"
 #include "sonic.h"
 #include "spin.h"
+#include "template.h"
+#include "template1.h"
 #include "tile.h"
 #include "togif.h"
 #include "uncaption.h"
@@ -63,6 +66,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports)
   exports.Set(Napi::String::New(env, "globe"), Napi::Function::New(env, Globe));
   exports.Set(Napi::String::New(env, "homebrew"), Napi::Function::New(env, Homebrew));
   exports.Set(Napi::String::New(env, "invert"), Napi::Function::New(env, Invert));
+  exports.Set(Napi::String::New(env, "jjos"), Napi::Function::New(env, JJoS));
   exports.Set(Napi::String::New(env, "jpeg"), Napi::Function::New(env, Jpeg));
   exports.Set(Napi::String::New(env, "magik"), Napi::Function::New(env, Magik));
   exports.Set(Napi::String::New(env, "meme"), Napi::Function::New(env, Meme));
@@ -77,6 +81,8 @@ Napi::Object Init(Napi::Env env, Napi::Object exports)
   exports.Set(Napi::String::New(env, "sonic"), Napi::Function::New(env, Sonic));
   exports.Set(Napi::String::New(env, "spin"), Napi::Function::New(env, Spin));
   exports.Set(Napi::String::New(env, "swirl"), Napi::Function::New(env, Swirl));
+  exports.Set(Napi::String::New(env, "template"), Napi::Function::New(env, Template));
+  exports.Set(Napi::String::New(env, "template1"), Napi::Function::New(env, Template1));
   exports.Set(Napi::String::New(env, "tile"), Napi::Function::New(env, Tile));
   exports.Set(Napi::String::New(env, "togif"), Napi::Function::New(env, ToGif));
   exports.Set(Napi::String::New(env, "uncaption"), Napi::Function::New(env, Uncaption));
