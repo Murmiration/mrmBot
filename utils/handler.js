@@ -35,18 +35,18 @@ export async function load(client, cluster, worker, ipc, command, soundStatus, s
   const categoryCommands = categories.get(category);
   categories.set(category, categoryCommands ? [...categoryCommands, commandName] : [commandName]);
 
-  if (slashReload && props.slashAllowed) {
-    const commandList = await client.getCommands();
-    const oldCommand = commandList.filter((item) => {
-      return item.name === commandName;
-    })[0];
-    await client.editCommand(oldCommand.id, {
-      name: commandName,
-      type: 1,
-      description: props.description,
-      options: props.flags
-    });
-  }
+  // if (slashReload && props.slashAllowed) {
+  //   const commandList = await client.getCommands();
+  //   const oldCommand = commandList.filter((item) => {
+  //     return item.name === commandName;
+  //   })[0];
+  //   await client.editCommand(oldCommand.id, {
+  //     name: commandName,
+  //     type: 1,
+  //     description: props.description,
+  //     options: props.flags
+  //   });
+  // }
   
   if (props.aliases) {
     for (const alias of props.aliases) {

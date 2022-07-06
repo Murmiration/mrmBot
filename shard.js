@@ -48,7 +48,7 @@ class Shard extends BaseClusterWorker {
     log("info", "Finished loading commands.");
 
     await database.setup(this.ipc);
-    await this.bot.bulkEditCommands(commandArray);
+    // await this.bot.bulkEditCommands(commandArray);
 
     // register events
     log("info", "Attempting to load events...");
