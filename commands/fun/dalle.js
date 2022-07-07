@@ -51,11 +51,11 @@ class DalleCommand extends Command {
     //     },
     //   });
     // }
+    // await this.client.createMessage(this.message.channel.id, out, images);
     let imgs = await jsonobj.images.map(r => Buffer.from(r, 'base64'));
     for(let i = 0; i < imgs.length; i++) {
       await this.client.createMessage(this.message.channel.id, `Repsonse ${i+1} from prompt: ${inputprompt}`, {file: imgs[i], name: `${i}.png`});
     }
-    await this.client.createMessage(this.message.channel.id, out, images);
     // return out;
     return;
   }
