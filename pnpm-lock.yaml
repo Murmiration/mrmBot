@@ -1,52 +1,53 @@
 lockfileVersion: '6.0'
 
-settings:
-  autoInstallPeers: true
-  excludeLinksFromLockfile: false
+specifiers:
+  '@babel/core': ^7.18.5
+  '@babel/eslint-parser': ^7.18.2
+  '@babel/eslint-plugin': ^7.17.7
+  '@babel/plugin-proposal-class-properties': ^7.17.12
+  '@top-gg/sdk': ^3.1.3
+  better-sqlite3: ^7.5.3
+  bufferutil: ^4.0.6
+  cmake-js: ^6.3.2
+  dotenv: ^16.0.1
+  emoji-regex: ^10.1.0
+  eris: ^0.17.1
+  eris-fleet: ^1.0.2
+  erlpack: github:abalabahaha/erlpack
+  eslint: ^8.18.0
+  eslint-plugin-unicorn: ^42.0.0
+  file-type: ^17.1.2
+  format-duration: ^2.0.0
+  jsqr: ^1.4.0
+  node-addon-api: ^5.0.0
+  node-emoji: ^1.11.0
+  node-fetch: ^3.2.6
+  pg: ^8.7.3
+  qrcode: ^1.5.0
+  sharp: ^0.30.7
+  shoukaku: ^3.1.2
+  uuid: ^8.3.2
+  winston: ^3.8.0
+  ws: ^8.8.0
+  zlib-sync: ^0.1.7
 
 dependencies:
-  dotenv:
-    specifier: ^16.1.4
-    version: 16.1.4
-  emoji-regex:
-    specifier: ^10.2.1
-    version: 10.2.1
-  file-type:
-    specifier: ^18.5.0
-    version: 18.5.0
-  format-duration:
-    specifier: ^3.0.2
-    version: 3.0.2
-  jsqr:
-    specifier: ^1.4.0
-    version: 1.4.0
-  node-addon-api:
-    specifier: ^6.1.0
-    version: 6.1.0
-  node-emoji:
-    specifier: ^1.11.0
-    version: 1.11.0
-  oceanic.js:
-    specifier: 1.7.1-dev.428b714
-    version: 1.7.1-dev.428b714
-  qrcode:
-    specifier: ^1.5.3
-    version: 1.5.3
-  sharp:
-    specifier: ^0.32.1
-    version: 0.32.1
-  shoukaku:
-    specifier: ^3.4.0
-    version: 3.4.0
-  undici:
-    specifier: ^5.22.1
-    version: 5.22.1
-  winston:
-    specifier: ^3.9.0
-    version: 3.9.0
-  winston-daily-rotate-file:
-    specifier: ^4.7.1
-    version: 4.7.1(winston@3.9.0)
+  '@top-gg/sdk': 3.1.3
+  cmake-js: 6.3.2
+  dotenv: 16.0.1
+  emoji-regex: 10.1.0
+  eris: 0.17.1_bufferutil@4.0.6
+  eris-fleet: 1.0.2_eris@0.17.1
+  file-type: 17.1.2
+  format-duration: 2.0.0
+  jsqr: 1.4.0
+  node-addon-api: 5.0.0
+  node-emoji: 1.11.0
+  node-fetch: 3.2.6
+  qrcode: 1.5.0
+  sharp: 0.30.7
+  shoukaku: 3.1.2_bufferutil@4.0.6
+  winston: 3.8.0
 
 optionalDependencies:
   better-sqlite3:
@@ -1317,15 +1318,29 @@ packages:
       once: 1.4.0
     dev: false
 
-  /enquirer@2.3.6:
-    resolution: {integrity: sha512-yjNnPr315/FjS4zIsUxYguYUPP2e1NK4d7E7ZOLiyYCcbFBiTMyID+2wvm2w6+pZ/odMA7cRkjhsPbltwBOrLg==}
-    engines: {node: '>=8.6'}
+  /eris-fleet/1.0.2_eris@0.17.1:
+    resolution: {integrity: sha512-wcaTGXGVwg4d8KEE1PSBArWF8xDzIssZIOX+/q+HObUyreWoSHaAT6Pqr9c1YbZF2Qu+tSYt4uCWlXJT1CCUiQ==}
+    peerDependencies:
+      eris: ~0.16.0
     dependencies:
-      ansi-colors: 4.1.3
+      eris: 0.17.1_bufferutil@4.0.6
     dev: false
     optional: true
 
-  /error-ex@1.3.2:
+  /eris/0.17.1_bufferutil@4.0.6:
+    resolution: {integrity: sha512-PexpHusPxViuzcsSM0GQEAgZRJbziFfeeLifc8+ZrvS88UusPieQlUD7pRm28E7m7rN+p+Rt6bf9jGLwD725Zg==}
+    engines: {node: '>=10.4.0'}
+    dependencies:
+      ws: 8.8.0_bufferutil@4.0.6
+    optionalDependencies:
+      opusscript: 0.0.8
+      tweetnacl: 1.0.3
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+    dev: false
+
+  /error-ex/1.3.2:
     resolution: {integrity: sha512-7dFHNmqeFSEt2ZBsCriorKnn3Z2pj+fd9kmI6QoWw4//DL+icEBfc0U7qJCisqrTsKTjw4fNFy2pW9OqStD84g==}
     dependencies:
       is-arrayish: 0.2.1
