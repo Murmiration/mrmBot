@@ -88,7 +88,8 @@ const Admiral = new Fleet({
       "guilds",
       "guildVoiceStates",
       "guildMessages",
-      "directMessages"
+      "directMessages",
+      "messageContent"
     ],
     stats: {
       requestTimeout: 30000
