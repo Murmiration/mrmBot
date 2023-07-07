@@ -1,73 +1,61 @@
-#include <Magick++.h>
-#include <napi.h>
+#include <vips/vips8>
 
-#include <iostream>
-#include <list>
+#include "common.h"
 
 using namespace std;
-using namespace Magick;
+using namespace vips;
 
-Napi::Value Scott(const Napi::CallbackInfo &info) {
-  Napi::Env env = info.Env();
-  Napi::Object result = Napi::Object::New(env);
+ArgumentMap Scott(string type, string *outType, char *BufferData, size_t BufferLength,
+            ArgumentMap Arguments, size_t *DataSize) {
+  string basePath = GetArgument<string>(Arguments, "basePath");
+  string assetPathIn = GetArgumentWithFallback<string>(Arguments, "assetPath", "assets/images/scott.png");
+  string distortPathIn = GetArgumentWithFallback<string>(Arguments, "distortPath", "assets/images/scottmap.png");
 
-  try {
-    Napi::Object obj = info[0].As<Napi::Object>();
-    Napi::Buffer<char> data = obj.Get("data").As<Napi::Buffer<char>>();
-    string type = obj.Get("type").As<Napi::String>().Utf8Value();
-    string basePath = obj.Get("basePath").As<Napi::String>().Utf8Value();
+  VOption *options = VImage::option()->set("access", "sequential");
 
-    Blob blob;
+  VImage in =
+      VImage::new_from_buffer(BufferData, BufferLength, "",
+                              type == "gif" ? options->set("n", -1) : options)
+          .colourspace(VIPS_INTERPRETATION_sRGB);
+  if (!in.has_alpha()) in = in.bandjoin(255);
 
-    list<Image> frames;
-    list<Image> coalesced;
-    list<Image> mid;
-    Image watermark;
-    try {
-      readImages(&frames, Blob(data.Data(), data.Length()));
-    } catch (Magick::WarningCoder &warning) {
-      cerr << "Coder Warning: " << warning.what() << endl;
-    } catch (Magick::Warning &warning) {
-      cerr << "Warning: " << warning.what() << endl;
-    }
-    watermark.read(basePath + "assets/images/scott.png");
-    coalesceImages(&coalesced, frames.begin(), frames.end());
+  int width = in.width();
+  int pageHeight = vips_image_get_page_height(in.get_image());
+  int nPages = vips_image_get_n_pages(in.get_image());
 
-    for (Image &image : coalesced) {
-      Image watermark_new = watermark;
-      image.virtualPixelMethod(Magick::TransparentVirtualPixelMethod);
-      image.backgroundColor("none");
-      image.scale(Geometry("415x234!"));
-      double arguments[16] = {0,   0,   129, 187, 415, 0,   517, 182,
-                              415, 234, 517, 465, 0,   234, 132, 418};
-      image.distort(Magick::PerspectiveDistortion, 16, arguments, true);
-      image.extent(Geometry("864x481"), Magick::CenterGravity);
-      watermark_new.composite(image, Geometry("-110+83"),
-                              Magick::OverCompositeOp);
-      watermark_new.magick(type);
-      watermark_new.animationDelay(image.animationDelay());
-      mid.push_back(watermark_new);
-    }
+  string assetPath = basePath + assetPathIn;
+  VImage bg = VImage::new_from_file(assetPath.c_str());
 
-    optimizeTransparency(mid.begin(), mid.end());
+  string distortPath = basePath + distortPathIn;
+  VImage distort = VImage::new_from_file(distortPath.c_str());
 
-    if (type == "gif") {
-      for (Image &image : mid) {
-        image.quantizeDitherMethod(FloydSteinbergDitherMethod);
-        image.quantize();
-      }
-    }
+  VImage distortImage =
+      ((distort[1] / 255) * 414).bandjoin((distort[0] / 255) * 233);
 
-    writeImages(mid.begin(), mid.end(), &blob);
-
-    result.Set("data", Napi::Buffer<char>::Copy(env, (char *)blob.data(),
-                                                blob.length()));
-    result.Set("type", type);
-  } catch (std::exception const &err) {
-    Napi::Error::New(env, err.what()).ThrowAsJavaScriptException();
-  } catch (...) {
-    Napi::Error::New(env, "Unknown error").ThrowAsJavaScriptException();
+  vector<VImage> img;
+  for (int i = 0; i < nPages; i++) {
+    VImage img_frame =
+        type == "gif" ? in.crop(0, i * pageHeight, width, pageHeight) : in;
+    VImage resized = img_frame.resize(
+        415 / (double)width,
+        VImage::option()->set("vscale", 234 / (double)pageHeight));
+    VImage mapped = resized.mapim(distortImage)
+                        .extract_band(0, VImage::option()->set("n", 3))
+                        .bandjoin(distort[2]);
+    VImage offset = mapped.embed(127, 181, 864, 481);
+    VImage composited = bg.composite2(offset, VIPS_BLEND_MODE_OVER);
+    img.push_back(composited);
   }
+  VImage final = VImage::arrayjoin(img, VImage::option()->set("across", 1));
+  final.set(VIPS_META_PAGE_HEIGHT, 481);
 
-  return result;
+  void *buf;
+  final.write_to_buffer(
+      ("." + *outType).c_str(), &buf, DataSize,
+      *outType == "gif" ? VImage::option()->set("dither", 1) : 0);
+
+  ArgumentMap output;
+  output["buf"] = (char *)buf;
+
+  return output;
 }

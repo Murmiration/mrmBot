@@ -1,19 +1,20 @@
 import ImageCommand from "../../classes/imageCommand.js";
 
 class JJoSCommand extends ImageCommand {
+  static category = "image-editing"
+  static description = "JJoS an image";
+
   params = {
-    distortcoords: [0,0,20,0,170,0,178,15,0,119,1,99,170,119,153,129],
-    template: "./assets/images/jjos.png",
-    compdim: "+256+118",
-    resizedim: "170x119!",
-    origdim: "450x311!"
+    assetPath: "assets/images/jjos.png",
+    distortPath: "assets/images/jjosmap.png",
+    compx: 261,
+    compy: 126
   };
 
-  static description = "JJoS";
   static aliases = ["hacker"];
 
-  static noImage = "You need to provide an image to fuck with!";
-  static command = "jjos";
+  static noImage = "You need to provide an image/GIF to JJoS!";
+  static command = "scott";
 }
 
 export default JJoSCommand;

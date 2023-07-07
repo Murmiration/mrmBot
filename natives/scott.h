@@ -1,5 +1,8 @@
 #pragma once
 
-#include <napi.h>
+#include "common.h"
 
-Napi::Value Scott(const Napi::CallbackInfo& info);
+using std::string;
+
+ArgumentMap Scott(string type, string* outType, char* BufferData, size_t BufferLength,
+            ArgumentMap Arguments, size_t* DataSize);
