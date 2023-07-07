@@ -1,5 +1,8 @@
 #pragma once
 
-#include <napi.h>
+#include "common.h"
 
-Napi::Value Template(const Napi::CallbackInfo& info);
+using std::string;
+
+ArgumentMap Template(string type, string* outType, char* BufferData, size_t BufferLength,
+            ArgumentMap Arguments, size_t* DataSize);

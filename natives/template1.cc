@@ -1,63 +1,76 @@
+#ifdef MAGICK_ENABLED
 #include <Magick++.h>
-#include <napi.h>
 
+#include <cstring>
 #include <iostream>
 #include <list>
+
+#include "common.h"
 
 using namespace std;
 using namespace Magick;
 
-Napi::Value Template1(const Napi::CallbackInfo &info) {
-  Napi::Env env = info.Env();
+ArgumentMap Template1(string type, string *outType, char *BufferData, size_t BufferLength,
+            [[maybe_unused]] ArgumentMap Arguments, size_t *DataSize) {
+  Blob blob;
+  list<Image> frames;
+  list<Image> coalesced;
+  list<Image> mid;
+  Image templateImg;
+  
+  string bgPath = GetArgumentWithFallback<string>(Arguments, "bgpath", "./assets/images/pixel.png");
+  string origDim = GetArgument<string>(Arguments, "origdim");
+  string resizeDim = GetArgument<string>(Arguments, "resizedim");
+  string compDim = GetArgumentWithFallback<string>(Arguments, "compdim", "+0+0");
+  string templateStr = GetArgument<string>(Arguments, "template");
+  int delay = GetArgumentWithFallback<int>(Arguments, "delay", 0);
 
   try {
-    Napi::Object obj = info[0].As<Napi::Object>();
-    Napi::Buffer<char> data = obj.Get("data").As<Napi::Buffer<char>>();
-    string templatestr = obj.Get("template").As<Napi::String>().Utf8Value();
-    string compdim = obj.Get("compdim").As<Napi::String>().Utf8Value();
-    string resizedim = obj.Get("resizedim").As<Napi::String>().Utf8Value();
-    string type = obj.Get("type").As<Napi::String>().Utf8Value();
-    int delay =
-        obj.Has("delay") ? obj.Get("delay").As<Napi::Number>().Int32Value() : 0;
+    templateImg.read(templateStr);
+  } catch (Magick::WarningCoder &warning) {
+    cerr << "Coder Warning: " << warning.what() << endl;
+  } catch (Magick::Warning &warning) {
+    cerr << "Warning: " << warning.what() << endl;
+  }
 
-    Blob blob;
-
-    list<Image> frames;
-    list<Image> coalesced;
-    list<Image> mid;
-
-    readImages(&frames, Blob(data.Data(), data.Length()));
-    coalesceImages(&coalesced, frames.begin(), frames.end());
+  try {
+    readImages(&frames, Blob(BufferData, BufferLength));
+  } catch (Magick::WarningCoder &warning) {
+    cerr << "Coder Warning: " << warning.what() << endl;
+  } catch (Magick::Warning &warning) {
+    cerr << "Warning: " << warning.what() << endl;
+  }
+  coalesceImages(&coalesced, frames.begin(), frames.end());
 
     for (Image &image : coalesced) {
       Image final;
-      final.read(templatestr);
-      image.scale(Geometry(resizedim));
-      final.composite(image, Geometry(compdim), Magick::OverCompositeOp);
+      final.read(templateStr);
+      image.scale(Geometry(resizeDim));
+      final.composite(image, Geometry(compDim), Magick::OverCompositeOp);
       final.magick(type);
       final.animationDelay(delay == 0 ? image.animationDelay() : delay);
       mid.push_back(final);
     }
 
-    optimizeTransparency(mid.begin(), mid.end());
+  optimizeTransparency(mid.begin(), mid.end());
 
-    if (type == "gif") {
-      for (Image &image : mid) {
-        image.quantizeDitherMethod(FloydSteinbergDitherMethod);
-        image.quantize();
-      }
+  if (type == "gif") {
+    for (Image &image : mid) {
+      image.quantizeDitherMethod(FloydSteinbergDitherMethod);
+      image.quantize();
     }
-
-    writeImages(mid.begin(), mid.end(), &blob);
-
-    Napi::Object result = Napi::Object::New(env);
-    result.Set("data", Napi::Buffer<char>::Copy(env, (char *)blob.data(),
-                                                blob.length()));
-    result.Set("type", type);
-    return result;
-  } catch (std::exception const &err) {
-    throw Napi::Error::New(env, err.what());
-  } catch (...) {
-    throw Napi::Error::New(env, "Unknown error");
   }
+
+  writeImages(mid.begin(), mid.end(), &blob);
+
+  *DataSize = blob.length();
+
+  char *data = (char *)malloc(*DataSize);
+  memcpy(data, blob.data(), *DataSize);
+
+  ArgumentMap output;
+  output["buf"] = data;
+
+  return output;
 }
+#endif
