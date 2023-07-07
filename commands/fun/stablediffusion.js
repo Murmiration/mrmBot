@@ -32,7 +32,7 @@ class StableDiffusionCommand extends Command {
 
     let jsonobj = await request.json();
 
-    let images = await jsonobj.images.map((img) => Buffer.from(img, "base64")).map((img, index) => ({contents: img, name: `${inputprompt}-${index}.png`}));
+    let images = await jsonobj.images.map((img) => Buffer.from(img, "base64")).map((img, index) => ({contents: img, name: `SPOILER_${inputprompt}-${index}.png`}));
 
     return {content: `Results for: \`${clean(inputprompt)}\``, files: images};
   }
