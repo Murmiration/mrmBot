@@ -19,8 +19,6 @@ class PlayCommand extends MusicCommand {
       query = query.substring(1, query.length - 1);
     }
     try {
-      // this is hacky, but I'm lazy
-      query = query.replace("tube.annoyingorange.xyz", "youtube.com");
       const url = new URL(query);
       return play(this.client, url, { channel: this.channel, guild: this.guild, member: this.member, type: this.type, interaction: this.interaction }, true);
     } catch {
