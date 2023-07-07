@@ -2,6 +2,7 @@ import fetch from "node-fetch";
 import Command from "../../classes/command.js";
 import { readFileSync } from "fs";
 const { auto1111 } = JSON.parse(readFileSync(new URL("../../config/sd-api.json", import.meta.url)));
+import { clean } from "../../utils/misc.js";
 
 class StableDiffusionCommand extends Command {
   async run() {
@@ -33,7 +34,7 @@ class StableDiffusionCommand extends Command {
 
     let images = await jsonobj.images.map((img) => Buffer.from(img, "base64")).map((img, index) => ({contents: img, name: `${inputprompt}-${index}.png`}));
 
-    return {content: `Results for: \`${inputprompt}\``, files: images};
+    return {content: `Results for: \`${clean(inputprompt)}\``, files: images};
   }
 
   static description = "Generates an Image based on your prompt using Automatic1111's Stabile Diffusion's WebUI API";
