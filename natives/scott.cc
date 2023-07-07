@@ -8,6 +8,8 @@ using namespace vips;
 ArgumentMap Scott(string type, string *outType, char *BufferData, size_t BufferLength,
             ArgumentMap Arguments, size_t *DataSize) {
   string basePath = GetArgument<string>(Arguments, "basePath");
+  string assetPathIn = GetArgumentWithFallback<string>(Arguments, "assetPath", "assets/images/scott.png");
+  string distortPathIn = GetArgumentWithFallback<string>(Arguments, "distortPath", "assets/images/scottmap.png");
 
   VOption *options = VImage::option()->set("access", "sequential");
 
@@ -21,10 +23,10 @@ ArgumentMap Scott(string type, string *outType, char *BufferData, size_t BufferL
   int pageHeight = vips_image_get_page_height(in.get_image());
   int nPages = vips_image_get_n_pages(in.get_image());
 
-  string assetPath = basePath + "assets/images/scott.png";
+  string assetPath = basePath + assetPathIn;
   VImage bg = VImage::new_from_file(assetPath.c_str());
 
-  string distortPath = basePath + "assets/images/scottmap.png";
+  string distortPath = basePath + distortPathIn;
   VImage distort = VImage::new_from_file(distortPath.c_str());
 
   VImage distortImage =
