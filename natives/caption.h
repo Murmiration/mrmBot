@@ -1,5 +1,8 @@
 #pragma once
 
-#include <napi.h>
+#include "common.h"
 
-Napi::Value Caption(const Napi::CallbackInfo& info);
+using std::string;
+
+ArgumentMap Caption(string type, string* outType, char* BufferData, size_t BufferLength,
+              ArgumentMap Arguments, size_t* DataSize);

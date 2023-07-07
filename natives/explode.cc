@@ -1,63 +1,55 @@
-#include <Magick++.h>
-#include <napi.h>
+#include <vips/vips8>
 
-#include <iostream>
-#include <list>
+#include "common.h"
 
 using namespace std;
-using namespace Magick;
+using namespace vips;
 
-Napi::Value Explode(const Napi::CallbackInfo &info) {
-  Napi::Env env = info.Env();
+ArgumentMap Explode(string type, string *outType, char *BufferData,
+              size_t BufferLength, ArgumentMap Arguments, size_t *DataSize) {
+  bool implode = GetArgumentWithFallback<bool>(Arguments, "implode", false);
+  string basePath = GetArgument<string>(Arguments, "basePath");
 
-  try {
-    Napi::Object obj = info[0].As<Napi::Object>();
-    Napi::Buffer<char> data = obj.Get("data").As<Napi::Buffer<char>>();
-    int amount = obj.Get("amount").As<Napi::Number>().Int32Value();
-    string type = obj.Get("type").As<Napi::String>().Utf8Value();
-    int delay =
-        obj.Has("delay") ? obj.Get("delay").As<Napi::Number>().Int32Value() : 0;
+  VOption *options = VImage::option();
 
-    Blob blob;
+  VImage in =
+      VImage::new_from_buffer(
+          BufferData, BufferLength, "",
+          type == "gif" ? options->set("n", -1)->set("access", "sequential")
+                        : options)
+          .colourspace(VIPS_INTERPRETATION_sRGB);
+  if (!in.has_alpha()) in = in.bandjoin(255);
 
-    list<Image> frames;
-    list<Image> coalesced;
-    list<Image> blurred;
-    try {
-      readImages(&frames, Blob(data.Data(), data.Length()));
-    } catch (Magick::WarningCoder &warning) {
-      cerr << "Coder Warning: " << warning.what() << endl;
-    } catch (Magick::Warning &warning) {
-      cerr << "Warning: " << warning.what() << endl;
-    }
-    coalesceImages(&coalesced, frames.begin(), frames.end());
+  int width = in.width();
+  int pageHeight = vips_image_get_page_height(in.get_image());
+  int nPages = vips_image_get_n_pages(in.get_image());
 
-    for (Image &image : coalesced) {
-      image.implode(amount);
-      image.magick(type);
-      blurred.push_back(image);
-    }
+  string distortPath = basePath + "assets/images/" +
+                       (implode ? "linearimplode.png" : "linearexplode.png");
+  VImage distort =
+      (VImage::new_from_file(distortPath.c_str())
+           .resize(width / 500.0, VImage::option()
+                                      ->set("vscale", pageHeight / 500.0)
+                                      ->set("kernel", VIPS_KERNEL_CUBIC)) /
+       65535);
 
-    optimizeTransparency(blurred.begin(), blurred.end());
+  VImage distortImage = (distort[0] * width).bandjoin(distort[1] * pageHeight);
 
-    if (type == "gif") {
-      for (Image &image : blurred) {
-        image.quantizeDither(false);
-        image.quantize();
-        if (delay != 0) image.animationDelay(delay);
-      }
-    }
-
-    writeImages(blurred.begin(), blurred.end(), &blob);
-
-    Napi::Object result = Napi::Object::New(env);
-    result.Set("data", Napi::Buffer<char>::Copy(env, (char *)blob.data(),
-                                                blob.length()));
-    result.Set("type", type);
-    return result;
-  } catch (std::exception const &err) {
-    throw Napi::Error::New(env, err.what());
-  } catch (...) {
-    throw Napi::Error::New(env, "Unknown error");
+  vector<VImage> img;
+  for (int i = 0; i < nPages; i++) {
+    VImage img_frame =
+        type == "gif" ? in.crop(0, i * pageHeight, width, pageHeight) : in;
+    VImage mapped = img_frame.mapim(distortImage);
+    img.push_back(mapped);
   }
+  VImage final = VImage::arrayjoin(img, VImage::option()->set("across", 1));
+  final.set(VIPS_META_PAGE_HEIGHT, pageHeight);
+
+  void *buf;
+  final.write_to_buffer(("." + *outType).c_str(), &buf, DataSize);
+
+  ArgumentMap output;
+  output["buf"] = (char *)buf;
+
+  return output;
 }

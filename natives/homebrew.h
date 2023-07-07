@@ -1,5 +1,7 @@
 #pragma once
 
-#include <napi.h>
+#include "common.h"
 
-Napi::Value Homebrew(const Napi::CallbackInfo& info);
+using std::string;
+
+ArgumentMap Homebrew(string type, string *outType, ArgumentMap Arguments, size_t *DataSize);

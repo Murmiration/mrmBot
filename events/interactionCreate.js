@@ -1,106 +1,95 @@
-import { promises } from "fs";
 import database from "../utils/database.js";
 import * as logger from "../utils/logger.js";
-import { commands } from "../utils/collections.js";
-import { CommandInteraction } from "eris";
+import { commands, messageCommands } from "../utils/collections.js";
 import { clean } from "../utils/misc.js";
+import { upload } from "../utils/tempimages.js";
 
 // run when a slash command is executed
-export default async (client, cluster, worker, ipc, interaction) => {
-  if (!(interaction instanceof CommandInteraction)) return;
+export default async (client, interaction) => {
+  // block if client is not ready yet
+  if (!client.ready) return;
+
+  // block non-command events
+  if (interaction?.type !== 2) return;
 
   // check if command exists and if it's enabled
   const command = interaction.data.name;
-  const cmd = commands.get(command);
-  if (!cmd) return;
+  let cmd = commands.get(command);
+  if (!cmd) {
+    cmd = messageCommands.get(command);
+    if (!cmd) return;
+  }
+  if (cmd.dbRequired && !database) {
+    await interaction["createMessage"]({ content: "This command is unavailable on stateless instances of esmBot.", flags: 64 });
+    return;
+  }
 
   const invoker = interaction.member ?? interaction.user;
 
   // actually run the command
-  logger.log("log", `${invoker.username} (${invoker.id}) ran slash command ${command}`);
+  logger.log("log", `${invoker.username} (${invoker.id}) ran application command ${command}`);
   try {
-    await database.addCount(command);
+    if (database) {
+      await database.addCount(command);
+    }
     // eslint-disable-next-line no-unused-vars
-    const commandClass = new cmd(client, cluster, worker, ipc, { type: "application", interaction });
+    const commandClass = new cmd(client, { type: "application", interaction });
     const result = await commandClass.run();
-    if (typeof result === "string" || (typeof result === "object" && result.embeds)) {
-      await interaction[interaction.acknowledged ? "editOriginalMessage" : "createMessage"](result);
-    } else if (typeof result === "object" && result.file) {
-      let fileSize = 8388119;
-      if (interaction.channel.guild) {
-        switch (interaction.channel.guild.premiumTier) {
-          case 2:
-            fileSize = 52428308;
-            break;
-          case 3:
-            fileSize = 104856616;
-            break;
-        }
-      }
-      if (result.file.length > fileSize) {
-        if (process.env.TEMPDIR && process.env.TEMPDIR !== "") {
-          const filename = `${Math.random().toString(36).substring(2, 15)}.${result.name.split(".")[1]}`;
-          await promises.writeFile(`${process.env.TEMPDIR}/${filename}`, result.file);
-          const imageURL = `${process.env.TMP_DOMAIN || "https://tmp.projectlounge.pw"}/${filename}`;
-          await interaction[interaction.acknowledged ? "editOriginalMessage" : "createMessage"]({
-            embeds: [{
-              color: 16711680,
-              title: "Here's your image!",
-              url: imageURL,
-              image: {
-                url: imageURL
-              },
-              footer: {
-                text: "The result image was more than 8MB in size, so it was uploaded to an external site instead."
-              },
-            }]
-          });
-          if (process.env.THRESHOLD) {
-            process.env.DIRSIZECACHE += result.file.length;
-            if (process.env.DIRSIZECACHE > process.env.THRESHOLD) {
-              const files = (await promises.readdir(process.env.TEMPDIR)).map((file) => {
-                return new Promise((resolve, reject) => {
-                  promises.stat(`${process.env.TEMPDIR}/${file}`).then((fstats)=>{
-                    resolve({
-                      name: file,
-                      size: fstats.size,
-                      ctime: fstats.ctime
-                    });
-                  }).catch(reject);
-                });
-              });
-              Promise.all(files).then((files) => {
-                process.env.DIRSIZECACHE = files.reduce((a, b)=>{
-                  return a+b.size;
-                }, 0);
-                const oldestFile = files.sort((a, b) => a.ctime - b.ctime)[0].name;
-                promises.rm(`${process.env.TEMPDIR}/${oldestFile}`);
-                logger.log(`Removed oldest image file: ${oldestFile}`);
-              });
-            }
+    const replyMethod = interaction.acknowledged ? (commandClass.edit ? "editOriginal" : "createFollowup") : "createMessage";
+    if (typeof result === "string") {
+      await interaction[replyMethod]({
+        content: result,
+        flags: commandClass.success ? 0 : 64
+      });
+    } else if (typeof result === "object") {
+      if (result.contents && result.name) {
+        const fileSize = 26214400;
+        if (result.contents.length > fileSize) {
+          if (process.env.TEMPDIR && process.env.TEMPDIR !== "") {
+            await upload(client, result, interaction, true);
+          } else {
+            await interaction[replyMethod]({
+              content: "The resulting image was more than 25MB in size, so I can't upload it.",
+              flags: 64
+            });
           }
         } else {
-          await interaction[interaction.acknowledged ? "editOriginalMessage" : "createMessage"]("The resulting image was more than 8MB in size, so I can't upload it.");
+          await interaction[replyMethod](result.text ? result.text : { files: [result] });
         }
       } else {
-        await interaction[interaction.acknowledged ? "editOriginalMessage" : "createMessage"](result.text ? result.text : {}, result);
+        await interaction[replyMethod](Object.assign({
+          flags: result.flags ?? (commandClass.success ? 0 : 64)
+        }, result));
       }
+    } else {
+      logger.warn(`Unknown return type for command ${command}: ${result} (${typeof result})`);
+      if (!result) return;
+      await interaction[replyMethod](Object.assign({
+        flags: commandClass.success ? 0 : 64
+      }, result));
     }
   } catch (error) {
+    const replyMethod = interaction.acknowledged ? "createFollowup" : "createMessage";
     if (error.toString().includes("Request entity too large")) {
-      await interaction[interaction.acknowledged ? "editOriginalMessage" : "createMessage"]("The resulting file was too large to upload. Try again with a smaller image if possible.");
+      await interaction[replyMethod]({ content: "The resulting file was too large to upload. Try again with a smaller image if possible.", flags: 64 });
     } else if (error.toString().includes("Job ended prematurely")) {
-      await interaction[interaction.acknowledged ? "editOriginalMessage" : "createMessage"]("Something happened to the image servers before I could receive the image. Try running your command again.");
-    } else if (error.toString().includes("Timed out")) {
-      await interaction[interaction.acknowledged ? "editOriginalMessage" : "createMessage"]("The request timed out before I could download that image. Try uploading your image somewhere else or reducing its size.");
+      await interaction[replyMethod]({ content: "Something happened to the image servers before I could receive the image. Try running your command again.", flags: 64 });
     } else {
-      logger.error(`Error occurred with slash command ${command} with arguments ${JSON.stringify(interaction.data.options)}: ${typeof error === "object" ? JSON.stringify(error) : error.toString()}`);
+      logger.error(`Error occurred with application command ${command} with arguments ${JSON.stringify(interaction.data.optionsArray)}: ${error.stack || error}`);
       try {
-        await interaction[interaction.acknowledged ? "editOriginalMessage" : "createMessage"]("Uh oh! I ran into an error while running this command. Please report the content of the attached file at the following link or on the esmBot Support server: <https://github.com/esmBot/esmBot/issues>", {
-          file: `Message: ${await clean(error)}\n\nStack Trace: ${await clean(error.stack)}`,
-          name: "error.txt"
+        let err = error;
+        if (error?.constructor?.name == "Promise") err = await error;
+        if (!interaction.acknowledged) await interaction.defer(); // Files can't be uploaded without deferring first
+        await interaction[replyMethod]({
+          content: "Uh oh! I ran into an error while running this command. Please report the content of the attached file at the following link or on the esmBot Support server: <https://github.com/esmBot/esmBot/issues>",
+          files: [{
+            contents: `Message: ${clean(err)}\n\nStack Trace: ${clean(err.stack)}`,
+            name: "error.txt"
+          }]
         });
-      } catch { /* silently ignore */ }
+      } catch (e) {
+        logger.error(`While attempting to send the previous error message, another error occurred: ${e.stack || e}`);
+      }
     }
   }
 };

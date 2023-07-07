@@ -1,5 +1,8 @@
 #pragma once
 
-#include <napi.h>
+#include "common.h"
 
-Napi::Value Uncaption(const Napi::CallbackInfo& info);
+using std::string;
+
+ArgumentMap Uncaption(string type, string* outType, char* BufferData, size_t BufferLength,
+                ArgumentMap Arguments, size_t* DataSize);

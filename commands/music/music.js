@@ -5,17 +5,22 @@ import { commands, aliases, info, categories } from "../../utils/collections.js"
 class MusicAIOCommand extends Command {
   async run() {
     let cmd = this.type === "classic" ? this.args[0] : this.optionsArray[0].name;
-    if (cmd === "music" || this.constructor.aliases.includes(cmd)) return "https://media.discordapp.net/attachments/322114245632327703/941958748874887178/robot_dance-trans.gif";
+    if (cmd === "music" || this.constructor.aliases.includes(cmd)) return "https://esmbot.net/robotdance.gif";
+    await this.acknowledge();
     if (this.type === "classic") {
       this.origOptions.args.shift();
     } else {
-      this.origOptions.interaction.data.options = this.origOptions.interaction.data.options[0].options;
+      this.origOptions.interaction.data.options.raw = this.origOptions.interaction.data.options.raw[0].options;
     }
     if (aliases.has(cmd)) cmd = aliases.get(cmd);
     if (commands.has(cmd) && info.get(cmd).category === "music") {
       const command = commands.get(cmd);
-      return await (new command(this.client, this.cluster, this.worker, this.ipc, this.origOptions)).run();
+      const inst = new command(this.client, this.origOptions);
+      const result =  await inst.run();
+      this.success = inst.success;
+      return result;
     } else {
+      this.success = false;
       return "That isn't a valid music command!";
     }
   }
@@ -36,7 +41,6 @@ class MusicAIOCommand extends Command {
   }
 
   static description = "Handles music playback";
-  static requires = ["sound"];
   static aliases = ["m"];
   static directAllowed = false;
 }

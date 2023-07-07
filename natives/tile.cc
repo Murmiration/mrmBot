@@ -1,75 +1,47 @@
-#include <Magick++.h>
-#include <napi.h>
+#include <vips/vips8>
 
-#include <iostream>
-#include <list>
+#include "common.h"
 
 using namespace std;
-using namespace Magick;
+using namespace vips;
 
-Napi::Value Tile(const Napi::CallbackInfo &info) {
-  Napi::Env env = info.Env();
-  Napi::Object result = Napi::Object::New(env);
+ArgumentMap Tile(string type, string *outType, char *BufferData,
+                 size_t BufferLength, [[maybe_unused]] ArgumentMap Arguments,
+                 size_t *DataSize) {
+  VOption *options = VImage::option();
 
-  try {
-    Napi::Object obj = info[0].As<Napi::Object>();
-    Napi::Buffer<char> data = obj.Get("data").As<Napi::Buffer<char>>();
-    string type = obj.Get("type").As<Napi::String>().Utf8Value();
+  VImage in =
+      VImage::new_from_buffer(BufferData, BufferLength, "",
+                              type == "gif" ? options->set("n", -1) : options)
+          .colourspace(VIPS_INTERPRETATION_sRGB);
+  if (!in.has_alpha()) in = in.bandjoin(255);
 
-    Blob blob;
+  int width = in.width();
+  int pageHeight = vips_image_get_page_height(in.get_image());
+  int nPages = vips_image_get_n_pages(in.get_image());
 
-    list<Image> frames;
-    list<Image> coalesced;
-    list<Image> mid;
-    try {
-      readImages(&frames, Blob(data.Data(), data.Length()));
-    } catch (Magick::WarningCoder &warning) {
-      cerr << "Coder Warning: " << warning.what() << endl;
-    } catch (Magick::Warning &warning) {
-      cerr << "Warning: " << warning.what() << endl;
-    }
-    coalesceImages(&coalesced, frames.begin(), frames.end());
-
-    for (Image &image : coalesced) {
-      list<Image> duplicated;
-      Image appended;
-      list<Image> montage;
-      Image frame;
-      image.magick(type);
-      for (int i = 0; i < 5; ++i) {
-        duplicated.push_back(image);
-      }
-      appendImages(&appended, duplicated.begin(), duplicated.end());
-      appended.repage();
-      for (int i = 0; i < 5; ++i) {
-        montage.push_back(appended);
-      }
-      appendImages(&frame, montage.begin(), montage.end(), true);
-      frame.repage();
-      frame.scale(Geometry("800x800>"));
-      frame.animationDelay(image.animationDelay());
-      mid.push_back(frame);
-    }
-
-    optimizeTransparency(mid.begin(), mid.end());
-
-    if (type == "gif") {
-      for (Image &image : mid) {
-        image.quantizeDitherMethod(FloydSteinbergDitherMethod);
-        image.quantize();
-      }
-    }
-
-    writeImages(mid.begin(), mid.end(), &blob);
-
-    result.Set("data", Napi::Buffer<char>::Copy(env, (char *)blob.data(),
-                                                blob.length()));
-    result.Set("type", type);
-  } catch (std::exception const &err) {
-    Napi::Error::New(env, err.what()).ThrowAsJavaScriptException();
-  } catch (...) {
-    Napi::Error::New(env, "Unknown error").ThrowAsJavaScriptException();
+  vector<VImage> img;
+  int finalHeight;
+  for (int i = 0; i < nPages; i++) {
+    VImage img_frame =
+        type == "gif" ? in.crop(0, i * pageHeight, width, pageHeight) : in;
+    VImage replicated = img_frame.replicate(5, 5);
+    double scale = 800.0 / replicated.height();
+    if (scale > 1) scale = 800.0 / replicated.width();
+    if (scale < 1) replicated = replicated.resize(scale);
+    finalHeight = replicated.height();
+    img.push_back(replicated);
   }
+  VImage final = VImage::arrayjoin(img, VImage::option()->set("across", 1));
+  final.set(VIPS_META_PAGE_HEIGHT, finalHeight);
 
-  return result;
+  void *buf;
+  final.write_to_buffer(
+      ("." + *outType).c_str(), &buf, DataSize,
+      *outType == "gif" ? VImage::option()->set("reoptimise", 1) : 0);
+
+  ArgumentMap output;
+  output["buf"] = (char *)buf;
+
+  return output;
 }

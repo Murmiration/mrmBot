@@ -1,6 +1,7 @@
 # Logs
 logs
 *.log
+*.log.gz
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -21,6 +22,7 @@ pids
 
 # Compiled binary addons (https://nodejs.org/api/addons.html)
 build/
+cli-build/
 
 # Dependency directories
 node_modules/
@@ -117,15 +119,8 @@ libvips/
 
 # Databases
 data/
-*.sqlite
+*sqlite*
 
-# Azure Functions artifacts
-bin
-obj
-appsettings.json
-local.settings.json
-
-# Azurite artifacts
-__blobstorage__
-__queuestorage__
-__azurite_db*__.json
+# Other lockfiles
+package-lock.json
+yarn.lock

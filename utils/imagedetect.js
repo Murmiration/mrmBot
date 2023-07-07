@@ -1,4 +1,4 @@
-import fetch from "node-fetch";
+import { request } from "undici";
 import { getType } from "./image.js";
 
 const tenorURLs = [
@@ -30,24 +30,37 @@ const gfycatURLs = [
   "giant.gfycat.com"
 ];
 
+const combined = [...tenorURLs, ...giphyURLs, ...giphyMediaURLs, ...imgurURLs, ...gfycatURLs];
+
 const imageFormats = ["image/jpeg", "image/png", "image/webp", "image/gif", "large"];
 const videoFormats = ["video/mp4", "video/webm", "video/mov"];
 
 // gets the proper image paths
-const getImage = async (image, image2, video, extraReturnTypes, gifv = false, type = null) => {
+const getImage = async (image, image2, video, extraReturnTypes, gifv = false, type = null, link = false) => {
   try {
+    const fileNameSplit = new URL(image).pathname.split("/");
+    const fileName = fileNameSplit[fileNameSplit.length - 1];
+    const fileNameNoExtension = fileName.slice(0, fileName.lastIndexOf("."));
     const payload = {
       url: image2,
-      path: image
+      path: image,
+      name: fileNameNoExtension
     };
-    if (gifv) {
-      const host = new URL(image2).host;
+    const host = new URL(image2).host;
+    if (gifv || (link && combined.includes(host))) {
       if (tenorURLs.includes(host)) {
         // Tenor doesn't let us access a raw GIF without going through their API,
         // so we use that if there's a key in the config
         if (process.env.TENOR !== "") {
-          const data = await fetch(`https://tenor.googleapis.com/v2/posts?ids=${image2.split("-").pop()}&media_filter=gif&limit=1&key=${process.env.TENOR}`);
-          if (data.status === 429) {
+          let id;
+          if (image2.includes("tenor.com/view/")) {
+            id = image2.split("-").pop();
+          } else if (image2.endsWith(".gif")) {
+            const redirect = (await request(image2, { method: "HEAD" })).headers.location;
+            id = redirect.split("-").pop();
+          }
+          const data = await request(`https://tenor.googleapis.com/v2/posts?ids=${id}&media_filter=gif&limit=1&client_key=esmBot%20${process.env.ESMBOT_VER}&key=${process.env.TENOR}`);
+          if (data.statusCode === 429) {
             if (extraReturnTypes) {
               payload.type = "tenorlimit";
               return payload;
@@ -55,8 +68,8 @@ const getImage = async (image, image2, video, extraReturnTypes, gifv = false, ty
               return;
             }
           }
-          const json = await data.json();
-          if (json.error) throw Error(json.error);
+          const json = await data.body.json();
+          if (json.error) throw Error(json.error.message);
           payload.path = json.results[0].media_formats.gif.url;
         }
       } else if (giphyURLs.includes(host)) {
@@ -69,7 +82,14 @@ const getImage = async (image, image2, video, extraReturnTypes, gifv = false, ty
         payload.path = image.replace(".mp4", ".gif");
       } else if (gfycatURLs.includes(host)) {
         // iirc Gfycat also seems to sometimes make GIFs static
-        payload.path = `https://thumbs.gfycat.com/${image.split("/").pop().split(".mp4")[0]}-size_restricted.gif`;
+        if (link) {
+          const data = await request(`https://api.gfycat.com/v1/gfycats/${image.split("/").pop().split(".mp4")[0]}`);
+          const json = await data.body.json();
+          if (json.errorMessage) throw Error(json.errorMessage);
+          payload.path = json.gfyItem.gifUrl;
+        } else {
+          payload.path = `https://thumbs.gfycat.com/${image.split("/").pop().split(".mp4")[0]}-size_restricted.gif`;
+        }
       }
       payload.type = "image/gif";
     } else if (video) {
@@ -101,18 +121,18 @@ const checkImages = async (message, extraReturnTypes, video, sticker) => {
         type = await getImage(message.embeds[0].video.url, message.embeds[0].url, video, extraReturnTypes, true);
         // then we check for other image types
       } else if ((message.embeds[0].type === "video" || message.embeds[0].type === "image") && message.embeds[0].thumbnail) {
-        type = await getImage(message.embeds[0].thumbnail.proxy_url, message.embeds[0].thumbnail.url, video, extraReturnTypes);
+        type = await getImage(message.embeds[0].thumbnail.proxyURL, message.embeds[0].thumbnail.url, video, extraReturnTypes);
         // finally we check both possible image fields for "generic" embeds
       } else if (message.embeds[0].type === "rich" || message.embeds[0].type === "article") {
         if (message.embeds[0].thumbnail) {
-          type = await getImage(message.embeds[0].thumbnail.proxy_url, message.embeds[0].thumbnail.url, video, extraReturnTypes);
+          type = await getImage(message.embeds[0].thumbnail.proxyURL, message.embeds[0].thumbnail.url, video, extraReturnTypes);
         } else if (message.embeds[0].image) {
-          type = await getImage(message.embeds[0].image.proxy_url, message.embeds[0].image.url, video, extraReturnTypes);
+          type = await getImage(message.embeds[0].image.proxyURL, message.embeds[0].image.url, video, extraReturnTypes);
         }
       }
       // then check the attachments
-    } else if (message.attachments.length !== 0 && message.attachments[0].width) {
-      type = await getImage(message.attachments[0].proxy_url, message.attachments[0].url, video);
+    } else if (message.attachments.size !== 0 && message.attachments.first().width) {
+      type = await getImage(message.attachments.first().proxyURL, message.attachments.first().url, video);
     }
   }
   // if the return value exists then return it
@@ -120,24 +140,25 @@ const checkImages = async (message, extraReturnTypes, video, sticker) => {
 };
 
 // this checks for the latest message containing an image and returns the url of the image
-export default async (client, cmdMessage, interaction, options, extraReturnTypes = false, video = false, sticker = false) => {
+export default async (client, cmdMessage, interaction, options, extraReturnTypes = false, video = false, sticker = false, singleMessage = false) => {
   // we start by determining whether or not we're dealing with an interaction or a message
   if (interaction) {
     // we can get a raw attachment or a URL in the interaction itself
     if (options) {
       if (options.image) {
-        const attachment = interaction.data.resolved.attachments[options.image];
-        const result = await getImage(attachment.proxy_url, attachment.url, video, attachment.content_type);
+        const attachment = interaction.data.resolved.attachments.get(options.image);
+        const result = await getImage(attachment.proxyURL, attachment.url, video, attachment.contentType);
         if (result !== false) return result;
       } else if (options.link) {
-        const result = await getImage(options.link, options.link, video);
+        const result = await getImage(options.link, options.link, video, extraReturnTypes, false, null, true);
         if (result !== false) return result;
       }
     }
-  } else {
+  }
+  if (cmdMessage) {
     // check if the message is a reply to another message
-    if (cmdMessage.messageReference) {
-      const replyMessage = await client.getMessage(cmdMessage.messageReference.channelID, cmdMessage.messageReference.messageID).catch(() => undefined);
+    if (cmdMessage.messageReference && !singleMessage) {
+      const replyMessage = await client.rest.channels.getMessage(cmdMessage.messageReference.channelID, cmdMessage.messageReference.messageID).catch(() => undefined);
       if (replyMessage) {
         const replyResult = await checkImages(replyMessage, extraReturnTypes, video, sticker);
         if (replyResult !== false) return replyResult;
@@ -147,15 +168,14 @@ export default async (client, cmdMessage, interaction, options, extraReturnTypes
     const result = await checkImages(cmdMessage, extraReturnTypes, video, sticker);
     if (result !== false) return result;
   }
-  // if there aren't any replies or interaction attachments then iterate over the last few messages in the channel
-  const messages = await client.getMessages((interaction ? interaction : cmdMessage).channel.id);
-  // iterate over each message
-  for (const message of messages) {
-    const result = await checkImages(message, extraReturnTypes, video, sticker);
-    if (result === false) {
-      continue;
-    } else {
-      return result;
+  if (!singleMessage) {
+    // if there aren't any replies or interaction attachments then iterate over the last few messages in the channel
+    const channel = (interaction ? interaction : cmdMessage).channel ?? await client.rest.channels.get((interaction ? interaction : cmdMessage).channelID);
+    const messages = await channel.getMessages();
+    // iterate over each message
+    for (const message of messages) {
+      const result = await checkImages(message, extraReturnTypes, video, sticker);
+      if (result !== false) return result;
     }
   }
 };

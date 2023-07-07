@@ -1,4 +1,4 @@
-import fetch from "node-fetch";
+import { request } from "undici";
 import WebSocket from "ws";
 import * as logger from "./logger.js";
 import { setTimeout } from "timers/promises";
@@ -22,9 +22,8 @@ class ImageConnection {
     this.auth = auth;
     this.tag = 0;
     this.disconnected = false;
-    this.njobs = 0;
-    this.max = 0;
     this.formats = {};
+    this.funcs = [];
     this.wsproto = null;
     if (tls) {
       this.wsproto = "wss";
@@ -43,18 +42,17 @@ class ImageConnection {
     } else {
       httpproto = "http";
     }
-    this.httpurl = `${httpproto}://${host}/image`;
+    this.httpurl = `${httpproto}://${host}`;
     this.conn.on("message", (msg) => this.onMessage(msg));
     this.conn.once("error", (err) => this.onError(err));
     this.conn.once("close", () => this.onClose());
   }
 
-  onMessage(msg) {
+  async onMessage(msg) {
     const op = msg.readUint8(0);
     if (op === Rinit) {
-      this.max = msg.readUint16LE(3);
-      this.njobs = msg.readUint16LE(5);
       this.formats = JSON.parse(msg.toString("utf8", 7));
+      this.funcs = Object.keys(this.formats);
       return;
     }
     const tag = msg.readUint16LE(1);
@@ -64,10 +62,7 @@ class ImageConnection {
       return;
     }
     this.requests.delete(tag);
-    if (op === Rqueue) this.njobs++;
-    if (op === Rcancel || op === Rwait) this.njobs--;
     if (op === Rerror) {
-      this.njobs--;
       promise.reject(new Error(msg.slice(3, msg.length).toString()));
       return;
     }
@@ -82,9 +77,7 @@ class ImageConnection {
     for (const [tag, obj] of this.requests.entries()) {
       obj.reject("Request ended prematurely due to a closed connection");
       this.requests.delete(tag);
-      if (obj.op === Twait || obj.op === Tcancel) this.njobs--;
     }
-    //this.requests.clear();
     if (!this.disconnected) {
       logger.warn(`Lost connection to ${this.host}, attempting to reconnect in 5 seconds...`);
       await setTimeout(5000);
@@ -107,30 +100,30 @@ class ImageConnection {
 
   queue(jobid, jobobj) {
     const str = JSON.stringify(jobobj);
-    const buf = Buffer.alloc(4);
-    buf.writeUint32LE(jobid);
+    const buf = Buffer.alloc(8);
+    buf.writeBigUint64LE(jobid);
     return this.do(Tqueue, jobid, Buffer.concat([buf, Buffer.from(str)]));
   }
 
   wait(jobid) {
-    const buf = Buffer.alloc(4);
-    buf.writeUint32LE(jobid);
+    const buf = Buffer.alloc(8);
+    buf.writeBigUint64LE(jobid);
     return this.do(Twait, jobid, buf);
   }
 
   cancel(jobid) {
-    const buf = Buffer.alloc(4);
-    buf.writeUint32LE(jobid);
+    const buf = Buffer.alloc(8);
+    buf.writeBigUint64LE(jobid);
     return this.do(Tcancel, jobid, buf);
   }
 
   async getOutput(jobid) {
-    const req = await fetch(`${this.httpurl}?id=${jobid}`, {
+    const req = await request(`${this.httpurl}/image?id=${jobid}`, {
       headers: {
-        "Authentication": this.auth || undefined
+        authentication: this.auth || undefined
       }
     });
-    const contentType = req.headers.get("Content-Type");
+    const contentType = req.headers["content-type"];
     let type;
     switch (contentType) {
       case "image/gif":
@@ -149,7 +142,18 @@ class ImageConnection {
         type = contentType;
         break;
     }
-    return { buffer: Buffer.from(await req.arrayBuffer()), type };
+    return { buffer: Buffer.from(await req.body.arrayBuffer()), type };
+  }
+
+  async getCount() {
+    const req = await request(`${this.httpurl}/count`, {
+      headers: {
+        authentication: this.auth || undefined
+      }
+    });
+    if (req.statusCode !== 200) return;
+    const res = parseInt(await req.body.text());
+    return res;
   }
 
   async do(op, id, data) {

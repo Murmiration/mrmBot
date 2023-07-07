@@ -1,27 +1,25 @@
 import { readFileSync } from "fs";
-import { dirname } from "path";
-import { fileURLToPath } from "url";
 const { version } = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url)));
 import Command from "../../classes/command.js";
-import { exec as baseExec } from "child_process";
-import { promisify } from "util";
-const exec = promisify(baseExec);
+import { getServers } from "../../utils/misc.js";
 
 class InfoCommand extends Command {
   async run() {
-    const owner = await this.ipc.fetchUser(process.env.OWNER.split(",")[0]);
-    const stats = await this.ipc.getStats();
+    let owner = this.client.users.get(process.env.OWNER.split(",")[0]);
+    if (!owner) owner = await this.client.rest.users.get(process.env.OWNER.split(",")[0]);
+    const servers = await getServers(this.client);
+    await this.acknowledge();
     return {
       embeds: [{
         color: 16711680,
         author: {
           name: "esmBot Info/Credits",
-          icon_url: this.client.user.avatarURL
+          iconURL: this.client.user.avatarURL()
         },
-        description: `This instance is managed by **${owner.username}#${owner.discriminator}**.`,
+        description: `This instance is managed by **${owner.username}${owner.discriminator === 0 ? `#${owner.discriminator}` : ""}**`,
         fields: [{
           name: "ℹ️ Version:",
-          value: `v${version}${process.env.NODE_ENV === "development" ? `-dev (${(await exec("git rev-parse HEAD", { cwd: dirname(fileURLToPath(import.meta.url)) })).stdout.substring(0, 7)})` : ""}`
+          value: `v${version}${process.env.NODE_ENV === "development" ? `-dev (${process.env.GIT_REV})` : ""}`
         },
         {
           name: "📝 Credits:",
@@ -29,11 +27,11 @@ class InfoCommand extends Command {
         },
         {
           name: "💬 Total Servers:",
-          value: stats && stats.guilds ? stats.guilds : `${this.client.guilds.size} (for this cluster only)`
+          value: servers ? servers : `${this.client.guilds.size} (for this process only)`
         },
         {
           name: "✅ Official Server:",
-          value: "[Click here!](https://projectlounge.pw/support)"
+          value: "[Click here!](https://esmbot.net/support)"
         },
         {
           name: "💻 Source Code:",
@@ -41,11 +39,11 @@ class InfoCommand extends Command {
         },
         {
           name: "🛡️ Privacy Policy:",
-          value: "[Click here!](https://projectlounge.pw/esmBot/privacy.html)"
+          value: "[Click here!](https://esmbot.net/privacy.html)"
         },
         {
-          name: "🐦 Twitter:",
-          value: "[Click here!](https://twitter.com/esmBot_)"
+          name: "🐘 Mastodon:",
+          value: "[Click here!](https://wetdry.world/@esmBot)"
         }
         ]
       }]

@@ -10,8 +10,7 @@ lavalink:
       soundcloud: true
       twitch: true
       vimeo: true
-      mixer: true
-      http: false
+      http: true
       local: true
     bufferDurationMs: 400
     youtubePlaylistLoadLimit: 6 # Number of pages at 100 each
@@ -19,43 +18,29 @@ lavalink:
     youtubeSearchEnabled: true
     soundcloudSearchEnabled: true
     gc-warnings: true
-    #ratelimit:
-      #ipBlocks: ["1.0.0.0/8", "..."] # list of ip blocks
-      #excludedIps: ["...", "..."] # ips which should be explicit excluded from usage by lavalink
-      #strategy: "RotateOnBan" # RotateOnBan | LoadBalance | NanoSwitch | RotatingNanoSwitch
-      #searchTriggersFail: true # Whether a search 429 should trigger marking the ip as failing
-      #retryLimit: -1 # -1 = use default lavaplayer value | 0 = infinity | >0 = retry will happen this numbers times
   plugins:
-    - dependency: "com.github.esmBot:lava-xm-plugin:v0.1.0"
+    - dependency: "com.github.esmBot:lava-xm-plugin:v0.2.1"
       repository: "https://jitpack.io"
-    - dependency: "com.github.Topis-Lavalink-Plugins:Topis-Source-Managers-Plugin:v2.0.6"
+    - dependency: "com.github.TopiSenpai.LavaSrc:lavasrc-plugin:3.2.0"
       repository: "https://jitpack.io"
 
 plugins:
-  topissourcemanagers:
+  lavasrc:
     providers:
       - "ytsearch:\"%ISRC%\""
       - "ytsearch:%QUERY%"
     sources:
       spotify: false
       applemusic: true
+      deezer: false
     spotify:
         clientId: "your client id"
         clientSecret: "your client secret"
         countryCode: "US"
     applemusic:
         countryCode: "US"
-
-metrics:
-  prometheus:
-    enabled: false
-    endpoint: /metrics
-
-sentry:
-  dsn: ""
-#  tags:
-#    some_key: some_value
-#    another_key: another_value
+    deezer:
+        masterDecryptionKey: "go looking for this somewhere"
 
 logging:
   file:

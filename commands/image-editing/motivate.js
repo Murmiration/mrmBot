@@ -1,14 +1,23 @@
 import ImageCommand from "../../classes/imageCommand.js";
-const allowedFonts = ["futura", "impact", "helvetica", "arial", "roboto", "noto", "times"];
+import { cleanMessage } from "../../utils/misc.js";
 
 class MotivateCommand extends ImageCommand {
+  async criteria(text, url) {
+    const [topText, bottomText] = text.replaceAll(url, "").split(/(?<!\\),/).map(elem => elem.trim());
+    if (topText === "" && bottomText === "") {
+      return false;
+    } else {
+      return true;
+    }
+  }
+
   params(url) {
-    const newArgs = this.options.text ?? this.args.filter(item => !item.includes(url)).join(" ");
-    const [topText, bottomText] = newArgs.split(/(?<!\\),/).map(elem => elem.trim());
+    const newArgs = this.options.text ?? this.args.join(" ");
+    const [topText, bottomText] = newArgs.replaceAll(url, "").split(/(?<!\\),/).map(elem => elem.trim());
     return {
-      top: topText.replaceAll("&", "&amp;").replaceAll(">", "&gt;").replaceAll("<", "&lt;").replaceAll("\"", "&quot;").replaceAll("'", "&apos;").replaceAll("\\n", "\n"),
-      bottom: bottomText ? bottomText.replaceAll("&", "&amp;").replaceAll(">", "&gt;").replaceAll("<", "&lt;").replaceAll("\"", "&quot;").replaceAll("'", "&apos;").replaceAll("\\n", "\n") : "",
-      font: this.options.font && allowedFonts.includes(this.options.font.toLowerCase()) ? this.options.font.toLowerCase() : "times"
+      top: cleanMessage(this.message ?? this.interaction, topText),
+      bottom: bottomText ? cleanMessage(this.message ?? this.interaction, bottomText) : "",
+      font: typeof this.options.font === "string" && this.constructor.allowedFonts.includes(this.options.font.toLowerCase()) ? this.options.font.toLowerCase() : "times"
     };
   }
 
@@ -19,7 +28,7 @@ class MotivateCommand extends ImageCommand {
       type: 3,
       choices: (() => {
         const array = [];
-        for (const font of allowedFonts) {
+        for (const font of this.allowedFonts) {
           array.push({ name: font, value: font });
         }
         return array;

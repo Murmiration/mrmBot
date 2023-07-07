@@ -1,5 +1,8 @@
 #pragma once
 
-#include <napi.h>
+#include "common.h"
 
-Napi::Value Jpeg(const Napi::CallbackInfo& info);
+using std::string;
+
+ArgumentMap Jpeg(string type, string* outType, char* BufferData, size_t BufferLength,
+           ArgumentMap Arguments, size_t* DataSize);

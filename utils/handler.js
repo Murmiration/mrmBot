@@ -1,52 +1,65 @@
-import { paths, commands, info, sounds, categories, aliases as _aliases } from "./collections.js";
+import { paths, commands, messageCommands, info, sounds, categories, aliases as _aliases } from "./collections.js";
 import { log } from "./logger.js";
+
+import { readFileSync } from "fs";
+
+const { blacklist } = JSON.parse(readFileSync(new URL("../config/commands.json", import.meta.url)));
 
 let queryValue = 0;
 
 // load command into memory
-export async function load(client, cluster, worker, ipc, command, soundStatus, slashReload = false) {
+export async function load(client, command, slashReload = false) {
   const { default: props } = await import(`${command}?v=${queryValue}`);
   queryValue++;
-  if (props.requires.includes("sound") && soundStatus) {
-    log("warn", `Failed to connect to some Lavalink nodes, skipped loading command ${command}...`);
+  const commandArray = command.split("/");
+  let commandName = commandArray[commandArray.length - 1].split(".")[0];
+  const category = commandArray[commandArray.length - 2];
+
+  if (blacklist.includes(commandName)) {
+    log("warn", `Skipped loading blacklisted command ${command}...`);
     return;
   }
-  const commandArray = command.split("/");
-  const commandName = commandArray[commandArray.length - 1].split(".")[0];
+
+  if (category === "message") {
+    const nameStringArray = commandName.split("-");
+    for (const index of nameStringArray.keys()) {
+      nameStringArray[index] = nameStringArray[index].charAt(0).toUpperCase() + nameStringArray[index].slice(1);
+    }
+    commandName = nameStringArray.join(" ");
+  }
 
   props.init();
-  
   paths.set(commandName, command);
-  commands.set(commandName, props);
 
-  if (Object.getPrototypeOf(props).name === "SoundboardCommand") sounds.set(commandName, props.file);
-
-  const category = commandArray[commandArray.length - 2];
-  info.set(commandName, {
+  const commandInfo = {
     category: category,
     description: props.description,
     aliases: props.aliases,
     params: props.arguments,
     flags: props.flags,
     slashAllowed: props.slashAllowed,
-    directAllowed: props.directAllowed
-  });
+    directAllowed: props.directAllowed,
+    adminOnly: props.adminOnly,
+    type: 1
+  };
+
+  if (category === "message") {
+    messageCommands.set(commandName, props);
+    commandInfo.type = 3;
+  } else {
+    commands.set(commandName, props);
+  }
+
+  if (slashReload && props.slashAllowed) {
+    await send(client);
+  }
+
+  if (Object.getPrototypeOf(props).name === "SoundboardCommand") sounds.set(commandName, props.file);
+
+  info.set(commandName, commandInfo);
 
   const categoryCommands = categories.get(category);
   categories.set(category, categoryCommands ? [...categoryCommands, commandName] : [commandName]);
-
-  // if (slashReload && props.slashAllowed) {
-  //   const commandList = await client.getCommands();
-  //   const oldCommand = commandList.filter((item) => {
-  //     return item.name === commandName;
-  //   })[0];
-  //   await client.editCommand(oldCommand.id, {
-  //     name: commandName,
-  //     type: 1,
-  //     description: props.description,
-  //     options: props.flags
-  //   });
-  // }
   
   if (props.aliases) {
     for (const alias of props.aliases) {
@@ -57,13 +70,14 @@ export async function load(client, cluster, worker, ipc, command, soundStatus, s
   return commandName;
 }
 
-export async function update() {
+export function update() {
   const commandArray = [];
-  for (const [name, command] of commands.entries()) {
+  const privateCommandArray = [];
+  const merged = new Map([...commands, ...messageCommands]);
+  for (const [name, command] of merged.entries()) {
     let cmdInfo = info.get(name);
     if (command.postInit) {
       const cmd = command.postInit();
-      //commands.set(name, cmd);
       cmdInfo = {
         category: cmdInfo.category,
         description: cmd.description,
@@ -71,17 +85,42 @@ export async function update() {
         params: cmd.arguments,
         flags: cmd.flags,
         slashAllowed: cmd.slashAllowed,
-        directAllowed: cmd.directAllowed
+        directAllowed: cmd.directAllowed,
+        adminOnly: cmd.adminOnly,
+        type: cmdInfo.type
       };
       info.set(name, cmdInfo);
     }
-    if (cmdInfo && cmdInfo.slashAllowed) commandArray.push({
-      name,
-      type: 1,
-      description: cmdInfo.description,
-      options: cmdInfo.flags,
-      dm_permission: cmdInfo.directAllowed
-    });
+    if (cmdInfo?.type === 3) {
+      (cmdInfo.adminOnly ? privateCommandArray : commandArray).push({
+        name: name,
+        type: cmdInfo.type,
+        dm_permission: cmdInfo.directAllowed
+      });
+    } else if (cmdInfo?.slashAllowed) {
+      (cmdInfo.adminOnly ? privateCommandArray : commandArray).push({
+        name,
+        type: cmdInfo.type,
+        description: cmdInfo.description,
+        options: cmdInfo.flags,
+        dm_permission: cmdInfo.directAllowed
+      });
+    }
   }
-  return commandArray;
+  return {
+    main: commandArray,
+    private: privateCommandArray
+  };
+}
+
+export async function send(bot) {
+  const commandArray = update();
+  log("info", "Sending application command data to Discord...");
+  let cmdArray = commandArray.main;
+  if (process.env.ADMIN_SERVER && process.env.ADMIN_SERVER !== "") {
+    await bot.application.bulkEditGuildCommands(process.env.ADMIN_SERVER, commandArray.private);
+  } else {
+    cmdArray = [...commandArray.main, ...commandArray.private];
+  }
+  await bot.application.bulkEditGlobalCommands(cmdArray);
 }

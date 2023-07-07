@@ -1,16 +1,16 @@
-import fetch from "node-fetch";
+import { request } from "undici";
 import Command from "../../classes/command.js";
 
 class DonateCommand extends Command {
   async run() {
     await this.acknowledge();
     let prefix = "";
-    const controller = new AbortController(); // eslint-disable-line no-undef
+    const controller = new AbortController();
     const timeout = setTimeout(() => {
       controller.abort();
     }, 5000);
     try {
-      const patrons = await fetch("https://projectlounge.pw/patrons", { signal: controller.signal }).then(data => data.json());
+      const patrons = await request("https://projectlounge.pw/patrons", { signal: controller.signal }).then(data => data.body.json());
       clearTimeout(timeout);
       prefix = "Thanks to the following patrons for their support:\n";
       for (const patron of patrons) {

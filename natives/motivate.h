@@ -1,5 +1,8 @@
 #pragma once
 
-#include <napi.h>
+#include "common.h"
 
-Napi::Value Motivate(const Napi::CallbackInfo& info);
+using std::string;
+
+ArgumentMap Motivate(string type, string* outType, char* BufferData, size_t BufferLength,
+               ArgumentMap Arguments, size_t* DataSize);

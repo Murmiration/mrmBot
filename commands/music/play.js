@@ -1,13 +1,17 @@
 import { play } from "../../utils/soundplayer.js";
 import MusicCommand from "../../classes/musicCommand.js";
-const prefixes = ["ytsearch:", "ytmsearch:", "scsearch:", "spsearch:", "amsearch:"];
+const prefixes = ["scsearch:", "spsearch:", "sprec:", "amsearch:", "dzsearch:", "dzisrc:"];
+if (process.env.YT_DISABLED !== "true") prefixes.push("ytsearch:", "ytmsearch:");
 
 class PlayCommand extends MusicCommand {
   async run() {
     const input = this.options.query ?? this.args.join(" ");
-    if (!input && (this.type === "classic" ? (!this.message || this.message.attachments.length <= 0) : !this.options.file)) return "You need to provide what you want to play!";
+    if (!input && ((!this.message || this.message?.attachments.size <= 0))) {
+      this.success = false;
+      return "You need to provide what you want to play!";
+    }
     let query = input ? input.trim() : "";
-    const attachment = this.type === "classic" ? this.message.attachments[0] : (this.options.file ? this.interaction.data.resolved.attachments[this.options.file] : null);
+    const attachment = this.type === "classic" ? this.message.attachments.first() : null;
     if (query.startsWith("||") && query.endsWith("||")) {
       query = query.substring(2, query.length - 2);
     }
@@ -15,24 +19,19 @@ class PlayCommand extends MusicCommand {
       query = query.substring(1, query.length - 1);
     }
     try {
-      // this is hacky, but I'm lazy
-      query = query.replace("tube.annoyingorange.xyz", "youtube.com");
       const url = new URL(query);
-      return await play(this.client, url, { channel: this.channel, member: this.member, type: this.type, interaction: this.interaction }, true);
+      return play(this.client, url, { channel: this.channel, guild: this.guild, member: this.member, type: this.type, interaction: this.interaction }, true);
     } catch {
-      const search = prefixes.some(v => query.startsWith(v)) ? query : !query && attachment ? attachment.url : `ytsearch:${query}`;
-      return await play(this.client, search, { channel: this.channel, member: this.member, type: this.type, interaction: this.interaction }, true);
+      const search = prefixes.some(v => query.startsWith(v)) ? query : !query && attachment ? attachment.url : (process.env.YT_DISABLED !== "true" ? `ytsearch:${query}` : `dzsearch:${query}`);
+      return play(this.client, search, { channel: this.channel, guild: this.guild, member: this.member, type: this.type, interaction: this.interaction }, true);
     }
   }
 
   static flags = [{
-    name: "file",
-    type: 11,
-    description: "An audio file attachment"
-  }, {
     name: "query",
     type: 3,
-    description: "An audio search query or URL"
+    description: "An audio search query or URL",
+    required: true
   }];
   static description = "Plays a song or adds it to the queue";
   static aliases = ["p"];

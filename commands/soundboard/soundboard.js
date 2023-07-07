@@ -6,9 +6,13 @@ import { sounds, info } from "../../utils/collections.js";
 class SoundboardAIOCommand extends Command {
   async run() {
     const soundName = this.type === "classic" ? this.args[0] : this.optionsArray[0].name;
-    if (!sounds.has(soundName)) return "You need to provide a sound to play!";
+    if (!sounds.has(soundName)) {
+      this.success = false;
+      return "You need to provide a sound to play!";
+    }
     const name = sounds.get(soundName);
-    return await play(this.client, name, { channel: this.channel, member: this.member, type: this.type, interaction: this.interaction });
+    await this.acknowledge();
+    return await play(this.client, name, { channel: this.channel, guild: this.guild, member: this.member, type: this.type, interaction: this.interaction });
   }
   
   static postInit() {
@@ -24,7 +28,6 @@ class SoundboardAIOCommand extends Command {
   }
 
   static description = "Plays a sound effect";
-  static requires = ["sound"];
   static aliases = ["sound", "sb"];
   static directAllowed = false;
 }

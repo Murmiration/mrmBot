@@ -15,56 +15,29 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v1
-    - name: Setup Node.js environment
-      uses: actions/setup-node@v2.1.2
-      with:
-        cache: 'pnpm'
     - name: Setup pnpm
-      uses: pnpm/action-setup@v2.2.2
+      uses: pnpm/action-setup@v2.2.4
       with:
-        version: 7
+        version: 8
+    - name: Setup Node.js environment
+      uses: actions/setup-node@v3.6.0
+      with:
+        node-version: 18
+        cache: pnpm
     - name: Install dependencies
-      run: sudo apt install libvips-dev libmagick++-dev
+      run: sudo apt update && sudo apt install -y cmake libvips-dev libmagick++-dev
     - name: Build
-      run: pnpm install --config.strict-peer-dependencies=false && pnpm run build
-
-  win32:
-    runs-on: windows-latest
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v1
-    - name: Setup MSYS2
-      uses: msys2/setup-msys2@v2
-      with:
-        msystem: MINGW64
-        update: true
-        install: git mingw-w64-x86_64-cc mingw-w64-x86_64-libvips mingw-w64-x86_64-imagemagick
-    - name: Setup Node.js environment
-      uses: actions/setup-node@v2.1.2
-      with:
-        cache: 'pnpm'
-    - name: Setup pnpm
-      uses: pnpm/action-setup@v2.2.2
-      with:
-        version: 7
-    - name: Build
-      shell: msys2 {0}
-      run: $PNPM_HOME/pnpm install --config.strict-peer-dependencies=false && $PNPM_HOME/pnpm run build
+      run: pnpm install --frozen-lockfile && pnpm run build
 
   darwin:
     runs-on: macos-latest
     steps:
     - name: Checkout
-      uses: actions/checkout@v1
-    - name: Setup Node.js environment
-      uses: actions/setup-node@v2.1.2
-      with:
-        cache: 'pnpm'
-    - name: Setup pnpm
-      uses: pnpm/action-setup@v2.2.2
-      with:
-        version: 7
+      uses: actions/checkout@v2
     - name: Install dependencies
-      run: brew install imagemagick vips
+      run: |
+        brew install imagemagick vips node pnpm npm
+        pnpm install --config.strict-peer-dependencies=false
     - name: Build
-      run: pnpm install --config.strict-peer-dependencies=false && pnpm run build
+      run: pnpm run build
+

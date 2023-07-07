@@ -1,11 +1,14 @@
-if (process.platform === "win32") console.error("\x1b[1m\x1b[31m\x1b[40m" + `WIN32 IS NOT OFFICIALLY SUPPORTED!
-Although there's a (very) slim chance of it working, multiple aspects of the bot are built with UNIX-like systems in mind and could break on Win32-based systems. If you want to run the bot on Windows, using Windows Subsystem for Linux is highly recommended.
-The bot will continue to run past this message, but keep in mind that it could break at any time. Continue running at your own risk; alternatively, stop the bot using Ctrl+C and install WSL.` + "\x1b[0m");
-if (process.versions.node.split(".")[0] < 15) {
+if (process.versions.node.split(".")[0] < 16) {
   console.error(`You are currently running Node.js version ${process.version}.
-esmBot requires Node.js version 15 or above.
+esmBot requires Node.js version 16 or above.
 Please refer to step 3 of the setup guide.`);
   process.exit(1);
+}
+if (process.platform === "win32") {
+  console.error("\x1b[1m\x1b[31m\x1b[40m" + `WINDOWS IS NOT OFFICIALLY SUPPORTED!
+Although there's a (very) slim chance of it working, multiple aspects of the bot are built with UNIX-like systems in mind and could break on Win32-based systems. If you want to run the bot on Windows, using Windows Subsystem for Linux is highly recommended.
+The bot will continue to run past this message in 5 seconds, but keep in mind that it could break at any time. Continue running at your own risk; alternatively, stop the bot using Ctrl+C and install WSL.` + "\x1b[0m");
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
 }
 
 // load config from .env file
@@ -14,29 +17,57 @@ import { fileURLToPath } from "url";
 import { config } from "dotenv";
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), ".env") });
 
-// main sharding manager
-import { Fleet } from "eris-fleet";
-import { isMaster } from "cluster";
+import { reloadImageConnections } from "./utils/image.js";
+
 // main services
-import Shard from "./shard.js";
-import ImageWorker from "./utils/services/image.js";
-import PrometheusWorker from "./utils/services/prometheus.js";
+import { Client } from "oceanic.js";
+import pm2 from "pm2";
 // some utils
 import { promises, readFileSync } from "fs";
-import winston from "winston";
+import { logger } from "./utils/logger.js";
 import { exec as baseExec } from "child_process";
 import { promisify } from "util";
-
 const exec = promisify(baseExec);
+// initialize command loader
+import { load } from "./utils/handler.js";
+// command collections
+import { paths } from "./utils/collections.js";
 // database stuff
 import database from "./utils/database.js";
-// dbl posting
-import { Api } from "@top-gg/sdk";
-const dbl = process.env.NODE_ENV === "production" && process.env.DBL ? new Api(process.env.DBL) : null;
+// lavalink stuff
+import { reload, connect, connected } from "./utils/soundplayer.js";
+// events
+import { endBroadcast, startBroadcast } from "./utils/misc.js";
+import { parseThreshold } from "./utils/tempimages.js";
 
-if (isMaster) {
-  const esmBotVersion = JSON.parse(readFileSync(new URL("./package.json", import.meta.url))).version;
-  const erisFleetVersion = JSON.parse(readFileSync(new URL("./node_modules/eris-fleet/package.json", import.meta.url))).version; // a bit of a hacky way to get the eris-fleet version
+const { types } = JSON.parse(readFileSync(new URL("./config/commands.json", import.meta.url)));
+const esmBotVersion = JSON.parse(readFileSync(new URL("./package.json", import.meta.url))).version;
+process.env.ESMBOT_VER = esmBotVersion;
+
+const intents = [
+  "GUILD_VOICE_STATES",
+  "DIRECT_MESSAGES",
+  "GUILDS"
+];
+if (types.classic) {
+  intents.push("GUILD_MESSAGES");
+  intents.push("MESSAGE_CONTENT");
+}
+
+async function* getFiles(dir) {
+  const dirents = await promises.readdir(dir, { withFileTypes: true });
+  for (const dirent of dirents) {
+    const name = dir + (dir.charAt(dir.length - 1) !== "/" ? "/" : "") + dirent.name;
+    if (dirent.isDirectory()) {
+      yield* getFiles(name);
+    } else if (dirent.name.endsWith(".js")) {
+      yield name;
+    }
+  }
+}
+
+async function init() {
+  await exec("git rev-parse HEAD").then(output => output.stdout.substring(0, 7), () => "unknown commit").then(o => process.env.GIT_REV = o);
   console.log(`
      ,*\`$                    z\`"v       
     F zBw\`%                 A ,W "W     
@@ -58,130 +89,142 @@ k  <BBBw BBBBEBBBBBBBBBBBBBBBBBQ4BM  #
       *+,   " F'"'*^~~~^"^\`  V+*^       
           \`"""                          
           
-esmBot ${esmBotVersion} (${(await exec("git rev-parse HEAD").then(output => output.stdout.substring(0, 7), () => "unknown commit"))}), powered by eris-fleet ${erisFleetVersion}
+esmBot ${esmBotVersion} (${process.env.GIT_REV})
 `);
-}
 
-const Admiral = new Fleet({
-  BotWorker: Shard,
-  token: `Bot ${process.env.TOKEN}`,
-  fetchTimeout: 900000,
-  startingStatus: {
-    status: "idle",
-    game: {
-      name: "Starting esmBot..."
+  if (!types.classic && !types.application) {
+    logger.error("Both classic and application commands are disabled! Please enable at least one command type in config/commands.json.");
+    return process.exit(1);
+  }
+
+  if (database) {
+    // database handling
+    const dbResult = await database.upgrade(logger);
+    if (dbResult === 1) return process.exit(1);
+  }
+
+  // process the threshold into bytes early
+  if (process.env.TEMPDIR && process.env.THRESHOLD) {
+    await parseThreshold();
+  }
+
+  // register commands and their info
+  logger.log("info", "Attempting to load commands...");
+  for await (const commandFile of getFiles(resolve(dirname(fileURLToPath(import.meta.url)), "./commands/"))) {
+    logger.log("main", `Loading command from ${commandFile}...`);
+    try {
+      await load(null, commandFile);
+    } catch (e) {
+      logger.error(`Failed to register command from ${commandFile}: ${e}`);
     }
-  },
-  whatToLog: {
-    blacklist: ["stats_update"]
-  },
-  clientOptions: {
+  }
+  logger.log("info", "Finished loading commands.");
+
+  if (database) {
+    await database.setup();
+  }
+  if (process.env.API_TYPE === "ws") await reloadImageConnections();
+
+  const shardArray = process.env.SHARDS ? JSON.parse(process.env.SHARDS)[process.env.pm_id - 1] : null;
+
+  // create the oceanic client
+  const client = new Client({
+    auth: `Bot ${process.env.TOKEN}`,
     allowedMentions: {
       everyone: false,
       roles: false,
       users: true,
       repliedUser: true
     },
-    restMode: true,
-    messageLimit: 50,
-    intents: [
-      "guilds",
-      "guildVoiceStates",
-      "guildMessages",
-      "directMessages",
-      "messageContent"
-    ],
-    stats: {
-      requestTimeout: 30000
+    gateway: {
+      concurrency: "auto",
+      maxShards: "auto",
+      shardIDs: shardArray,
+      presence: {
+        status: "idle",
+        activities: [{
+          type: 0,
+          name: "Starting esmBot..."
+        }]
+      },
+      intents
     },
-    connectionTimeout: 30000
-  },
-  useCentralRequestHandler: process.env.DEBUG_LOG ? false : true, // workaround for eris-fleet weirdness
-  services: [
-    { name: "prometheus", ServiceWorker: PrometheusWorker },
-    { name: "image", ServiceWorker: ImageWorker }
-  ]
-});
-
-if (isMaster) {
-  const logger = winston.createLogger({
-    levels: {
-      error: 0,
-      warn: 1,
-      info: 2,
-      main: 3,
-      debug: 4
-    },
-    transports: [
-      new winston.transports.Console({ format: winston.format.colorize({ all: true }), stderrLevels: ["error", "warn"] }),
-      new winston.transports.File({ filename: "logs/error.log", level: "error" }),
-      new winston.transports.File({ filename: "logs/main.log" })
-    ],
-    level: process.env.DEBUG_LOG ? "debug" : "main",
-    format: winston.format.combine(
-      winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
-      winston.format.printf((info) => {
-        const {
-          timestamp, level, message, ...args
-        } = info;
-
-        return `[${timestamp}]: [${level.toUpperCase()}] - ${message} ${Object.keys(args).length ? JSON.stringify(args, null, 2) : ""}`;
-      }),
-    )
-  });
-
-  winston.addColors({
-    info: "green",
-    main: "gray",
-    debug: "magenta",
-    warn: "yellow",
-    error: "red"
-  });
-
-  database.upgrade(logger).then(result => {
-    if (result === 1) return process.exit(1);
-  });
-
-  Admiral.on("log", (m) => logger.main(m));
-  Admiral.on("info", (m) => logger.info(m));
-  Admiral.on("debug", (m) => logger.debug(m));
-  Admiral.on("warn", (m) => logger.warn(m));
-  Admiral.on("error", (m) => logger.error(m));
-
-  if (dbl) {
-    Admiral.on("stats", async (m) => {
-      await dbl.postStats({
-        serverCount: m.guilds,
-        shardCount: m.shardCount
-      });
-    });
-  }
-
-  // process the threshold into bytes early
-  if (process.env.TEMPDIR && process.env.THRESHOLD) {
-    const matched = process.env.THRESHOLD.match(/(\d+)([KMGT])/);
-    const sizes = {
-      K: 1024,
-      M: 1048576,
-      G: 1073741824,
-      T: 1099511627776
-    };
-    if (matched && matched[1] && matched[2]) {
-      process.env.THRESHOLD = matched[1] * sizes[matched[2]];
-    } else {
-      logger.error("Invalid THRESHOLD config.");
-      process.env.THRESHOLD = undefined;
+    collectionLimits: {
+      messages: 50,
+      channels: !types.classic ? 0 : Infinity
     }
-    const dirstat = (await promises.readdir(process.env.TEMPDIR)).map(async (file) => {
-      return new Promise((resolve) => {
-        promises.stat(`${process.env.TEMPDIR}/${file}`).then((stats) => {
-          resolve(stats.size);
+  });
+
+  // register events
+  logger.log("info", "Attempting to load events...");
+  for await (const file of getFiles(resolve(dirname(fileURLToPath(import.meta.url)), "./events/"))) {
+    logger.log("main", `Loading event from ${file}...`);
+    const eventArray = file.split("/");
+    const eventName = eventArray[eventArray.length - 1].split(".")[0];
+    if (eventName === "interactionCreate" && !types.application) {
+      logger.log("warn", `Skipped loading event from ${file} because application commands are disabled`);
+      continue;
+    }
+    const { default: event } = await import(file);
+    client.on(eventName, event.bind(null, client));
+  }
+  logger.log("info", "Finished loading events.");
+
+  // PM2-specific handling
+  if (process.env.PM2_USAGE) {
+    // callback hell :)
+    pm2.launchBus((err, pm2Bus) => {
+      if (err) {
+        logger.error(err);
+        return;
+      }
+      pm2.list((err, list) => {
+        if (err) {
+          logger.error(err);
+          return;
+        }
+        const managerProc = list.filter((v) => v.name === "esmBot-manager")[0];
+        pm2Bus.on("process:msg", async (packet) => {
+          switch (packet.data?.type) {
+            case "reload":
+              await load(client, paths.get(packet.data.message), true);
+              break;
+            case "soundreload":
+              await reload(client);
+              break;
+            case "imagereload":
+              await reloadImageConnections();
+              break;
+            case "broadcastStart":
+              startBroadcast(client, packet.data.message);
+              break;
+            case "broadcastEnd":
+              endBroadcast(client);
+              break;
+            case "serverCounts":
+              pm2.sendDataToProcessId(managerProc.pm_id, {
+                id: managerProc.pm_id,
+                type: "process:msg",
+                data: {
+                  type: "serverCounts",
+                  guilds: client.guilds.size,
+                  shards: client.shards.size
+                },
+                topic: true
+              }, (err) => {
+                if (err) logger.error(err);
+              });
+              break;
+          }
         });
       });
     });
-    const size = await Promise.all(dirstat);
-    process.env.DIRSIZECACHE = size.reduce((a, b)=>{
-      return a + b;
-    }, 0);
   }
+
+  // connect to lavalink
+  if (!connected) connect(client);
+
+  client.connect();
 }
+
+init();

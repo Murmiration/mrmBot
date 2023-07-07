@@ -1,14 +1,14 @@
 import ImageCommand from "../../classes/imageCommand.js";
+import { cleanMessage } from "../../utils/misc.js";
 const words = ["me irl", "dank", "follow my second account @esmBot_", "2016", "meme", "wholesome", "reddit", "instagram", "twitter", "facebook", "fortnite", "minecraft", "relatable", "gold", "funny", "template", "hilarious", "memes", "deep fried", "2020", "leafy", "pewdiepie"];
-const allowedFonts = ["futura", "impact", "helvetica", "arial", "roboto", "noto", "times"];
 
 class CaptionTwoCommand extends ImageCommand {
   params(url) {
     const newArgs = this.options.text ?? this.args.filter(item => !item.includes(url)).join(" ");
     return {
-      caption: newArgs && newArgs.trim() ? newArgs.replaceAll("&", "&amp;").replaceAll(">", "&gt;").replaceAll("<", "&lt;").replaceAll("\"", "&quot;").replaceAll("'", "&apos;").replaceAll("\\n", "\n") : words.sort(() => 0.5 - Math.random()).slice(0, Math.floor(Math.random() * words.length + 1)).join(" "),
+      caption: newArgs && newArgs.trim() ? cleanMessage(this.message ?? this.interaction, newArgs) : words.sort(() => 0.5 - Math.random()).slice(0, Math.floor(Math.random() * words.length + 1)).join(" "),
       top: !!this.options.top,
-      font: this.options.font && allowedFonts.includes(this.options.font.toLowerCase()) ? this.options.font.toLowerCase() : "helvetica"
+      font: typeof this.options.font === "string" && this.constructor.allowedFonts.includes(this.options.font.toLowerCase()) ? this.options.font.toLowerCase() : "helvetica"
     };
   }
 
@@ -23,7 +23,7 @@ class CaptionTwoCommand extends ImageCommand {
       type: 3,
       choices: (() => {
         const array = [];
-        for (const font of allowedFonts) {
+        for (const font of this.allowedFonts) {
           array.push({ name: font, value: font });
         }
         return array;

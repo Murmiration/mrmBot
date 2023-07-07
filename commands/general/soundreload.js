@@ -1,30 +1,33 @@
 import Command from "../../classes/command.js";
+import { reload } from "../../utils/soundplayer.js";
 
 class SoundReloadCommand extends Command {
-  // another very hacky command
-  run() {
-    return new Promise((resolve) => {
-      const owners = process.env.OWNER.split(",");
-      if (!owners.includes(this.author.id)) return "Only the bot owner can reload Lavalink!";
-      this.acknowledge().then(() => {
-        this.ipc.broadcast("soundreload");
-        this.ipc.register("soundReloadSuccess", (msg) => {
-          this.ipc.unregister("soundReloadSuccess");
-          this.ipc.unregister("soundReloadFail");
-          resolve(`Successfully connected to ${msg.length} Lavalink node(s).`);
-        });
-        this.ipc.register("soundReloadFail", () => {
-          this.ipc.unregister("soundReloadSuccess");
-          this.ipc.unregister("soundReloadFail");
-          resolve("I couldn't connect to any Lavalink nodes!");
-        });
+  async run() {
+    const owners = process.env.OWNER.split(",");
+    if (!owners.includes(this.author.id)) {
+      this.success = false;
+      return "Only the bot owner can reload Lavalink!";
+    }
+    await this.acknowledge();
+    const length = await reload();
+    if (process.env.PM2_USAGE) {
+      process.send({
+        type: "process:msg",
+        data: {
+          type: "soundreload"
+        }
       });
-
-    });
+    }
+    if (length) {
+      return `Successfully connected to ${length} Lavalink node(s).`;
+    } else {
+      return "I couldn't connect to any Lavalink nodes!";
+    }
   }
 
   static description = "Attempts to reconnect to all available Lavalink nodes";
   static aliases = ["lava", "lavalink", "lavaconnect", "soundconnect"];
+  static adminOnly = true;
 }
 
 export default SoundReloadCommand;

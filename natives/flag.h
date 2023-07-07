@@ -1,5 +1,8 @@
 #pragma once
 
-#include <napi.h>
+#include "common.h"
 
-Napi::Value Flag(const Napi::CallbackInfo& info);
+using std::string;
+
+ArgumentMap Flag(string type, string* outType, char* BufferData, size_t BufferLength,
+           ArgumentMap Arguments, size_t* DataSize);

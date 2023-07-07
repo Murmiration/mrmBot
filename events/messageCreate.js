@@ -1,99 +1,105 @@
-import { promises } from "fs";
 import database from "../utils/database.js";
 import { log, error as _error } from "../utils/logger.js";
 import { prefixCache, aliases, disabledCache, disabledCmdCache, commands } from "../utils/collections.js";
 import parseCommand from "../utils/parseCommand.js";
 import { clean } from "../utils/misc.js";
+import { upload } from "../utils/tempimages.js";
+import { ThreadChannel } from "oceanic.js";
+
+let mentionRegex;
 
 // run when someone sends a message
-export default async (client, cluster, worker, ipc, message) => {
+export default async (client, message) => {
+  // block if client is not ready yet
+  if (!client.ready) return;
+
   // ignore other bots
   if (message.author.bot) return;
 
   // don't run command if bot can't send messages
-  if (message.channel.guild && !message.channel.permissionsOf(client.user.id).has("sendMessages")) return;
+  let permChannel = message.channel;
+  if (permChannel instanceof ThreadChannel && !permChannel.parent) {
+    try {
+      permChannel = await client.rest.channels.get(message.channel.parentID);
+    } catch {
+      return;
+    }
+  }
+  if (message.guildID && !permChannel.permissionsOf(client.user.id.toString()).has("SEND_MESSAGES")) return;
 
-  let prefixCandidate;
+  if (!mentionRegex) mentionRegex = new RegExp(`^<@!?${client.user.id}> `);
+
   let guildDB;
-  if (message.channel.guild) {
-    const cachedPrefix = prefixCache.get(message.channel.guild.id);
-    if (cachedPrefix) {
-      prefixCandidate = cachedPrefix;
+  let text;
+  const mentionResult = message.content.match(mentionRegex);
+  if (mentionResult) {
+    text = message.content.substring(mentionResult[0].length).trim();
+  } else if (message.guildID && database) {
+    const cachedPrefix = prefixCache.get(message.guildID);
+    if (cachedPrefix && message.content.startsWith(cachedPrefix)) {
+      text = message.content.substring(cachedPrefix.length).trim();
     } else {
-      guildDB = await database.getGuild(message.channel.guild.id);
-      if (!guildDB) {
-        guildDB = await database.fixGuild(message.channel.guild);
+      guildDB = await database.getGuild(message.guildID);
+      if (message.content.startsWith(guildDB.prefix)) {
+        text = message.content.substring(guildDB.prefix.length).trim();
+        prefixCache.set(message.guildID, guildDB.prefix);
+      } else {
+        return;
       }
-      prefixCandidate = guildDB.prefix;
-      prefixCache.set(message.channel.guild.id, guildDB.prefix);
     }
-  }
-
-  let prefix;
-  let isMention = false;
-  if (message.channel.guild) {
-    const user = message.channel.guild.members.get(client.user.id);
-    if (message.content.startsWith(user.mention)) {
-      prefix = `${user.mention} `;
-      isMention = true;
-    } else if (message.content.startsWith(`<@${client.user.id}>`)) { // workaround for member.mention not accounting for both mention types
-      prefix = `<@${client.user.id}> `;
-      isMention = true;
-    } else {
-      prefix = prefixCandidate;
-    }
+  } else if (message.content.startsWith(process.env.PREFIX)) {
+    text = message.content.substring(process.env.PREFIX.length).trim();
+  } else if (!message.guildID) {
+    text = message.content;
   } else {
-    prefix = process.env.PREFIX;
+    return;
   }
-
-  // ignore other stuff
-  if (!message.content.startsWith(prefix)) return;
 
   // separate commands and args
-  const replace = isMention ? `@${(message.channel.guild ? message.channel.guild.members.get(client.user.id).nick : client.user.username) ?? client.user.username} ` : prefix;
-  const content = message.cleanContent.substring(replace.length).trim();
-  const rawContent = message.content.substring(prefix.length).trim();
-  const preArgs = content.split(/\s+/g);
-  preArgs.shift();
-  const command = rawContent.split(/\s+/g).shift().toLowerCase();
-  const parsed = parseCommand(preArgs);
+  const preArgs = text.split(/\s+/g);
+  const command = preArgs.shift().toLowerCase();
   const aliased = aliases.get(command);
-
-  // don't run if message is in a disabled channel
-  if (message.channel.guild) {
-    const disabled = disabledCache.get(message.channel.guild.id);
-    if (disabled) {
-      if (disabled.includes(message.channel.id) && command != "channel") return;
-    } else {
-      guildDB = await database.getGuild(message.channel.guild.id);
-      disabledCache.set(message.channel.guild.id, guildDB.disabled);
-      if (guildDB.disabled.includes(message.channel.id) && command !== "channel") return;
-    }
-
-    const disabledCmds = disabledCmdCache.get(message.channel.guild.id);
-    if (disabledCmds) {
-      if (disabledCmds.includes(aliased ?? command)) return;
-    } else {
-      guildDB = await database.getGuild(message.channel.guild.id);
-      disabledCmdCache.set(message.channel.guild.id, guildDB.disabled_commands ?? guildDB.disabledCommands);
-      if ((guildDB.disabled_commands ?? guildDB.disabledCommands).includes(aliased ?? command)) return;
-    }
-  }
 
   // check if command exists and if it's enabled
   const cmd = commands.get(aliased ?? command);
   if (!cmd) return;
 
   // block certain commands from running in DMs
-  if (!cmd.directAllowed && !message.channel.guild) return;
+  if (!cmd.directAllowed && !message.guildID) return;
+
+  if (cmd.dbRequired && !database) {
+    await client.rest.channels.createMessage(message.channelID, {
+      content: "This command is unavailable on stateless instances of esmBot."
+    });
+    return;
+  }
+
+  // don't run if message is in a disabled channel
+  if (message.guildID && database) {
+    let disabled = disabledCache.get(message.guildID);
+    if (!disabled) {
+      if (!guildDB) guildDB = await database.getGuild(message.guildID);
+      disabledCache.set(message.guildID, guildDB.disabled);
+      disabled = guildDB.disabled;
+    }
+    if (disabled.includes(message.channelID) && command !== "channel") return;
+
+    let disabledCmds = disabledCmdCache.get(message.guildID);
+    if (!disabledCmds) {
+      if (!guildDB) guildDB = await database.getGuild(message.guildID);
+      disabledCmdCache.set(message.guildID, guildDB.disabled_commands ?? guildDB.disabledCommands);
+      disabledCmds = guildDB.disabled_commands ?? guildDB.disabledCommands;
+    }
+    if (disabledCmds.includes(aliased ?? command)) return;
+  }
 
   // actually run the command
   log("log", `${message.author.username} (${message.author.id}) ran classic command ${command}`);
   const reference = {
     messageReference: {
-      channelID: message.channel.id,
+      channelID: message.channelID,
       messageID: message.id,
-      guildID: message.channel.guild ? message.channel.guild.id : undefined,
+      guildID: message.guildID ?? undefined,
       failIfNotExists: false
     },
     allowedMentions: {
@@ -101,106 +107,81 @@ export default async (client, cluster, worker, ipc, message) => {
     }
   };
   try {
-    await database.addCount(aliases.get(command) ?? command);
+    // parse args
+    const parsed = parseCommand(preArgs);
+    if (database) {
+      await database.addCount(aliases.get(command) ?? command);
+    }
     const startTime = new Date();
     // eslint-disable-next-line no-unused-vars
-    const commandClass = new cmd(client, cluster, worker, ipc, { type: "classic", message, args: parsed._, content: message.content.substring(prefix.length).trim().replace(command, "").trim(), specialArgs: (({ _, ...o }) => o)(parsed) }); // we also provide the message content as a parameter for cases where we need more accuracy
+    const commandClass = new cmd(client, { type: "classic", message, args: parsed._, content: text.replace(command, "").trim(), specialArgs: (({ _, ...o }) => o)(parsed) }); // we also provide the message content as a parameter for cases where we need more accuracy
     const result = await commandClass.run();
     const endTime = new Date();
     if ((endTime - startTime) >= 180000) reference.allowedMentions.repliedUser = true;
     if (typeof result === "string") {
       reference.allowedMentions.repliedUser = true;
-      await client.createMessage(message.channel.id, Object.assign({
+      await client.rest.channels.createMessage(message.channelID, Object.assign({
         content: result
       }, reference));
-    } else if (typeof result === "object" && result.embeds) {
-      await client.createMessage(message.channel.id, Object.assign(result, reference));
-    } else if (typeof result === "object" && result.file) {
-      let fileSize = 8388119;
-      if (message.channel.guild) {
-        switch (message.channel.guild.premiumTier) {
-          case 2:
-            fileSize = 52428308;
-            break;
-          case 3:
-            fileSize = 104856616;
-            break;
+    } else if (typeof result === "object") {
+      if (result.contents && result.name) {
+        let fileSize = 26214400;
+        if (message.guildID) {
+          switch (message.guild.premiumTier) {
+            case 2:
+              fileSize = 52428308;
+              break;
+            case 3:
+              fileSize = 104856616;
+              break;
+          }
         }
-      }
-      if (result.file.length > fileSize) {
-        if (process.env.TEMPDIR && process.env.TEMPDIR !== "") {
-          const filename = `${Math.random().toString(36).substring(2, 15)}.${result.name.split(".")[1]}`;
-          await promises.writeFile(`${process.env.TEMPDIR}/${filename}`, result.file);
-          const imageURL = `${process.env.TMP_DOMAIN || "https://tmp.projectlounge.pw"}/${filename}`;
-          await client.createMessage(message.channel.id, Object.assign({
-            embeds: [{
-              color: 16711680,
-              title: "Here's your image!",
-              url: imageURL,
-              image: {
-                url: imageURL
-              },
-              footer: {
-                text: "The result image was more than 8MB in size, so it was uploaded to an external site instead."
-              },
-            }]
-          }, reference));
-          if (process.env.THRESHOLD) {
-            process.env.DIRSIZECACHE += result.file.length;
-            if (process.env.DIRSIZECACHE > process.env.THRESHOLD) {
-              const files = (await promises.readdir(process.env.TEMPDIR)).map((file) => {
-                return new Promise((resolve, reject) => {
-                  promises.stat(`${process.env.TEMPDIR}/${file}`).then((fstats)=>{
-                    resolve({
-                      name: file,
-                      size: fstats.size,
-                      ctime: fstats.ctime
-                    });
-                  }).catch(reject);
-                });
-              });
-              Promise.all(files).then((files) => {
-                process.env.DIRSIZECACHE = files.reduce((a, b)=>{
-                  return a+b.size;
-                }, 0);
-                const oldestFile = files.sort((a, b) => a.ctime - b.ctime)[0].name;
-                promises.rm(`${process.env.TEMPDIR}/${oldestFile}`);
-                log(`Removed oldest image file: ${oldestFile}`);
-              });
-            }
+        if (result.contents.length > fileSize) {
+          if (process.env.TEMPDIR && process.env.TEMPDIR !== "") {
+            await upload(client, result, message);
+          } else {
+            await client.rest.channels.createMessage(message.channelID, {
+              content: "The resulting image was more than 25MB in size, so I can't upload it."
+            });
           }
         } else {
-          await client.createMessage(message.channel.id, "The resulting image was more than 8MB in size, so I can't upload it.");
+          await client.rest.channels.createMessage(message.channelID, Object.assign({
+            content: result.text ? result.text : undefined,
+            files: [result]
+          }, reference));
         }
       } else {
-        await client.createMessage(message.channel.id, Object.assign({
-          content: result.text ? result.text : undefined
-        }, reference), result);
+        await client.rest.channels.createMessage(message.channelID, Object.assign(result, reference));
       }
     }
   } catch (error) {
     if (error.toString().includes("Request entity too large")) {
-      await client.createMessage(message.channel.id, Object.assign({
+      await client.rest.channels.createMessage(message.channelID, Object.assign({
         content: "The resulting file was too large to upload. Try again with a smaller image if possible."
       }, reference));
     } else if (error.toString().includes("Job ended prematurely")) {
-      await client.createMessage(message.channel.id, Object.assign({
+      await client.rest.channels.createMessage(message.channelID, Object.assign({
         content: "Something happened to the image servers before I could receive the image. Try running your command again."
       }, reference));
     } else if (error.toString().includes("Timed out")) {
-      await client.createMessage(message.channel.id, Object.assign({
+      await client.rest.channels.createMessage(message.channelID, Object.assign({
         content: "The request timed out before I could download that image. Try uploading your image somewhere else or reducing its size."
       }, reference));
     } else {
-      _error(`Error occurred with command message ${message.cleanContent}: ${typeof error === "object" ? JSON.stringify(error) : error.toString()}`);
+      _error(`Error occurred with command message ${message.content}: ${error.stack || error}`);
       try {
-        await client.createMessage(message.channel.id, Object.assign({
-          content: "Uh oh! I ran into an error while running this command. Please report the content of the attached file at the following link or on the esmBot Support server: <https://github.com/esmBot/esmBot/issues>"
-        }, reference), [{
-          file: `Message: ${await clean(error)}\n\nStack Trace: ${await clean(error.stack)}`,
-          name: "error.txt"
-        }]);
-      } catch { /* silently ignore */ }
+        let err = error;
+        if (error?.constructor?.name === "Promise") err = await error;
+        await client.rest.channels.createMessage(message.channelID, Object.assign({
+          content: "Uh oh! I ran into an error while running this command. Please report the content of the attached file at the following link or on the esmBot Support server: <https://github.com/esmBot/esmBot/issues>",
+          files: [{
+            contents: `Message: ${clean(err)}\n\nStack Trace: ${clean(err.stack)}`,
+            name: "error.txt"
+          }]
+        }, reference));
+      } catch (e) {
+        _error(`While attempting to send the previous error message, another error occurred: ${e.stack || e}`);
+      }
     }
   }
 };

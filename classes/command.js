@@ -1,24 +1,27 @@
+import { Constants } from "oceanic.js";
+
 class Command {
-  constructor(client, cluster, worker, ipc, options) {
+  constructor(client, options) {
     this.client = client;
-    this.cluster = cluster;
-    this.worker = worker;
-    this.ipc = ipc;
     this.origOptions = options;
     this.type = options.type;
     this.args = options.args;
+    this.success = true;
+    this.edit = false;
     if (options.type === "classic") {
       this.message = options.message;
       this.channel = options.message.channel;
+      this.guild = options.message.guild;
       this.author = options.message.author;
       this.member = options.message.member;
+      this.permissions = this.channel ? this.channel.permissionsOf(client.user.id.toString()) : Constants.AllTextPermissions;
       this.content = options.content;
       this.options = options.specialArgs;
       this.reference = {
         messageReference: {
-          channelID: this.channel.id,
+          channelID: this.message.channelID,
           messageID: this.message.id,
-          guildID: this.channel.guild ? this.channel.guild.id : undefined,
+          guildID: this.message.guildID ?? undefined,
           failIfNotExists: false
         },
         allowedMentions: {
@@ -28,14 +31,16 @@ class Command {
     } else if (options.type === "application") {
       this.interaction = options.interaction;
       this.args = [];
-      this.channel = options.interaction.channel;
+      this.channel = options.interaction.channel ?? { id: options.interaction.channelID };
+      this.guild = options.interaction.guild;
       this.author = this.member = options.interaction.guildID ? options.interaction.member : options.interaction.user;
+      this.permissions = options.interaction.appPermissions;
       if (options.interaction.data.options) {
-        this.options = options.interaction.data.options.reduce((obj, item) => {
+        this.options = options.interaction.data.options.raw.reduce((obj, item) => {
           obj[item.name] = item.value;
           return obj;
         }, {});
-        this.optionsArray = options.interaction.data.options;
+        this.optionsArray = options.interaction.data.options.raw;
       } else {
         this.options = {};
       }
@@ -46,11 +51,12 @@ class Command {
     return "It works!";
   }
 
-  async acknowledge() {
+  async acknowledge(flags) {
     if (this.type === "classic") {
-      await this.client.sendChannelTyping(this.channel.id);
-    } else {
-      await this.interaction.acknowledge();
+      const channel = this.channel ?? await this.client.rest.channels.get(this.message.channelID);
+      await channel.sendTyping();
+    } else if (!this.interaction.acknowledged) {
+      await this.interaction.defer(flags);
     }
   }
 
@@ -62,9 +68,9 @@ class Command {
   static aliases = [];
   static arguments = [];
   static flags = [];
-  static requires = [];
   static slashAllowed = true;
   static directAllowed = true;
+  static adminOnly = false;
 }
 
 export default Command;

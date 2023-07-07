@@ -1,5 +1,8 @@
 #pragma once
 
-#include <napi.h>
+#include "common.h"
 
-Napi::Value Deepfry(const Napi::CallbackInfo& info);
+using std::string;
+
+ArgumentMap Deepfry(string type, string* outType, char* BufferData, size_t BufferLength,
+              ArgumentMap Arguments, size_t* DataSize);

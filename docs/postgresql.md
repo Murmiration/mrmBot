@@ -1,32 +1,34 @@
 # PostgreSQL
 Here are some instructions for setting up PostgreSQL for use with esmBot.
 
-**1. Install PostgreSQL.**
+### 1. Install PostgreSQL.
 
-#### Debian/Ubuntu
-```sh
-sudo apt-get install postgresql postgresql-client
-```
-
-#### Alpine
-```sh
-doas apk add postgresql
-```
-
-#### Arch/Manjaro
-```sh
-sudo pacman -S postgresql
-```
+=== "Debian/Ubuntu"
+    ```sh
+    sudo apt-get install postgresql postgresql-client
+    ```
+=== "Fedora/RHEL"
+    ```sh
+    sudo dnf install postgresql postgresql-server
+    ```
+=== "Alpine"
+    ```sh
+    doas apk add postgresql
+    ```
+=== "Arch/Manjaro"
+    ```sh
+    sudo pacman -S postgresql
+    ```
 
 ***
 
-**2. (Optional) Tune PostgreSQL.**
+### 2. (Optional) Tune PostgreSQL.
 
 [PGTune](https://pgtune.leopard.in.ua/) is a useful tool for generating configuration files for your PostgreSQL database. It is highly recommended that you generate a config using this tool as it can increase stability and performance.
 
 ***
 
-**3. Create the bot user and database.**
+### 3. Create the bot user and database.
 
 When you install PostgreSQL, it'll create a new user on your system that acts as the "superuser" of the database. You'll need to run Postgres commands as this user; however, you can run a command as that user without switching to it by using `sudo`.
 
@@ -47,11 +49,10 @@ Once you're inside the shell, you'll need to make sure the bot owns the database
 ```sql
 ALTER DATABASE esmbot OWNER TO esmbot;
 ```
-The database is now accessible by the bot, but it still doesn't know how to add/get data from it. To fix that, you'll need to add some tables. Luckily, the bot comes with a script to automate this:
-```sh
-POSTGRES_USER=esmbot POSTGRES_DB=esmbot utils/psqlinit.sh
-```
+
 You're done!
+
+***
 
 ### Troubleshooting
 If you get an error like `error: permission denied for table counts` when attempting to run the bot, try running these commands in the PostgreSQL shell:

@@ -4,7 +4,10 @@ import Command from "../../classes/command.js";
 
 class CountCommand extends Command {
   async run() {
-    if (this.channel.guild && !this.channel.permissionsOf(this.client.user.id).has("embedLinks")) return "I don't have the `Embed Links` permission!";
+    if (this.guild && !this.permissions.has("EMBED_LINKS")) {
+      this.success = false;
+      return "I don't have the `Embed Links` permission!";
+    }
     const counts = await database.getCounts();
     const countArray = [];
     for (const entry of Object.entries(counts)) {
@@ -34,17 +37,18 @@ class CountCommand extends Command {
           description: value.join("\n"),
           author: {
             name: this.author.username,
-            icon_url: this.author.avatarURL
+            iconURL: this.author.avatarURL()
           }
         }]
       });
     }
-    return paginator(this.client, { type: this.type, message: this.message, interaction: this.interaction, channel: this.channel, author: this.author }, embeds);
+    return paginator(this.client, { type: this.type, message: this.message, interaction: this.interaction, author: this.author }, embeds);
   }
 
   static description = "Gets how many times every command was used";
   static arguments = ["{mention/id}"];
   static aliases = ["counts"];
+  static dbRequired = true;
 }
 
 export default CountCommand;

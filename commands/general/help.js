@@ -1,37 +1,36 @@
-import { Constants } from "eris";
+import { Constants } from "oceanic.js";
 import database from "../../utils/database.js";
 import * as collections from "../../utils/collections.js";
 import { random } from "../../utils/misc.js";
 import paginator from "../../utils/pagination/pagination.js";
 import * as help from "../../utils/help.js";
 import Command from "../../classes/command.js";
-const tips = ["You can change the bot's prefix using the prefix command.", "Image commands also work with images previously posted in that channel.", "You can use the tags commands to save things for later use.", "You can visit https://projectlounge.pw/esmBot/help.html for a web version of this command list.", "You can view a command's aliases by putting the command name after the help command (e.g. help image).", "Parameters wrapped in [] are required, while parameters wrapped in {} are optional.", "esmBot is hosted and paid for completely out-of-pocket by the main developer. If you want to support development, please consider donating! https://patreon.com/TheEssem", "You can run commands in DMs as well, just message the bot with your command - no prefix needed!"];
-const argTypes = Object.keys(Constants.ApplicationCommandOptionTypes);
+const tips = ["You can change the bot's prefix using the prefix command.", "Image commands also work with images previously posted in that channel.", "You can use the tags commands to save things for later use.", "You can visit https://esmbot.net/help.html for a web version of this command list.", "You can view a command's aliases by putting the command name after the help command (e.g. help image).", "Parameters wrapped in [] are required, while parameters wrapped in {} are optional.", "esmBot is hosted and paid for completely out-of-pocket by the main developer. If you want to support development, please consider donating! https://patreon.com/TheEssem"];
 
 class HelpCommand extends Command {
   async run() {
-    const { prefix } = this.channel.guild ? await database.getGuild(this.channel.guild.id) : "N/A";
+    let prefix;
+    if (this.guild && database) {
+      prefix = (await database.getGuild(this.guild.id)).prefix;
+    } else {
+      prefix = process.env.PREFIX;
+    }
     if (this.args.length !== 0 && (collections.commands.has(this.args[0].toLowerCase()) || collections.aliases.has(this.args[0].toLowerCase()))) {
       const command = collections.aliases.get(this.args[0].toLowerCase()) ?? this.args[0].toLowerCase();
       const info = collections.info.get(command);
-      const counts = await database.getCounts();
       const embed = {
         embeds: [{
           author: {
             name: "esmBot Help",
-            icon_url: this.client.user.avatarURL
+            iconURL: this.client.user.avatarURL()
           },
-          title: `${this.channel.guild ? prefix : ""}${command}`,
-          url: "https://projectlounge.pw/esmBot/help.html",
-          description: command === "tags" ? "The main tags command. Check the help page for more info: https://projectlounge.pw/esmBot/help.html" : info.description,
+          title: `${this.guild ? prefix : ""}${command}`,
+          url: "https://esmbot.net/help.html",
+          description: command === "tags" ? "The main tags command. Check the help page for more info: https://esmbot.net/help.html" : info.description,
           color: 16711680,
           fields: [{
             name: "Aliases",
             value: info.aliases.length !== 0 ? info.aliases.join(", ") : "None"
-          }, {
-            name: "Times Used",
-            value: counts[command],
-            inline: true
           }, {
             name: "Parameters",
             value: command === "tags" ? "[name]" : (info.params ? (info.params.length !== 0 ? info.params.join(" ") : "None") : "None"),
@@ -39,11 +38,18 @@ class HelpCommand extends Command {
           }]
         }]
       };
+      if (database) {
+        embed.embeds[0].fields.push({
+          name: "Times used",
+          value: (await database.getCounts())[command],
+          inline: true
+        });
+      }
       if (info.flags.length !== 0) {
         const flagInfo = [];
         for (const flag of info.flags) {
           if (flag.type === 1) continue;
-          flagInfo.push(`\`--${flag.name}${flag.type ? `=[${argTypes[flag.type - 1]}]` : ""}\` - ${flag.description}`);
+          flagInfo.push(`\`--${flag.name}${flag.type ? `=[${Constants.ApplicationCommandOptionTypes[flag.type]}]` : ""}\` - ${flag.description}`);
         }
         if (flagInfo.length !== 0) {
           embed.embeds[0].fields.push({
@@ -54,9 +60,12 @@ class HelpCommand extends Command {
       }
       return embed;
     } else {
-      if (this.channel.guild && !this.channel.permissionsOf(this.client.user.id).has("embedLinks")) return "I don't have the `Embed Links` permission!";
+      if (this.guild && !this.permissions.has("EMBED_LINKS")) {
+        this.success = false;
+        return "I don't have the `Embed Links` permission!";
+      }
       const pages = [];
-      if (help.categories === help.categoryTemplate && !help.generated) await help.generateList();
+      if (help.categories === help.categoryTemplate && !help.generated) help.generateList();
       for (const category of Object.keys(help.categories)) {
         const splitPages = help.categories[category].map((item, index) => {
           return index % 15 === 0 ? help.categories[category].slice(index, index + 15) : null;
@@ -80,7 +89,7 @@ class HelpCommand extends Command {
           embeds: [{
             author: {
               name: "esmBot Help",
-              icon_url: this.client.user.avatarURL
+              iconURL: this.client.user.avatarURL()
             },
             title: value.title,
             description: value.page.join("\n"),
@@ -90,7 +99,7 @@ class HelpCommand extends Command {
             },
             fields: [{
               name: "Prefix",
-              value: this.channel.guild ? prefix : "N/A"
+              value: prefix
             }, {
               name: "Tip",
               value: random(tips)
@@ -98,7 +107,7 @@ class HelpCommand extends Command {
           }]
         });
       }
-      return paginator(this.client, { type: this.type, message: this.message, interaction: this.interaction, channel: this.channel, author: this.author }, embeds);
+      return paginator(this.client, { type: this.type, message: this.message, interaction: this.interaction, author: this.author }, embeds);
     }
   }
 

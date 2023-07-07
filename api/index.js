@@ -11,7 +11,7 @@ import { createRequire } from "module";
 import EventEmitter from "events";
 
 const nodeRequire = createRequire(import.meta.url);
-const magick = nodeRequire(`../build/${process.env.DEBUG && process.env.DEBUG === "true" ? "Debug" : "Release"}/image.node`);
+const img = nodeRequire(`../build/${process.env.DEBUG && process.env.DEBUG === "true" ? "Debug" : "Release"}/image.node`);
 
 const Rerror = 0x01;
 const Tqueue = 0x02;
@@ -92,7 +92,7 @@ wss.on("connection", (ws, request) => {
   const cur = Buffer.alloc(2);
   cur.writeUInt16LE(jobAmount);
   const formats = {};
-  for (const cmd of Object.keys(magick)) {
+  for (const cmd of img.funcs) {
     formats[cmd] = ["image/png", "image/gif", "image/jpeg", "image/webp"];
   }
   const init = Buffer.concat([Buffer.from([Rinit]), Buffer.from([0x00, 0x00]), num, cur, Buffer.from(JSON.stringify(formats))]);
@@ -106,9 +106,9 @@ wss.on("connection", (ws, request) => {
     const opcode = msg.readUint8(0);
     const tag = msg.slice(1, 3);
     const req = msg.toString().slice(3);
-    if (opcode == Tqueue) {
-      const id = msg.readUInt32LE(3);
-      const obj = msg.slice(7);
+    if (opcode === Tqueue) {
+      const id = msg.readBigInt64LE(3);
+      const obj = msg.slice(11);
       const job = { msg: obj, num: jobAmount, verifyEvent: new EventEmitter() };
       jobs.set(id, job);
       queue.push(id);
@@ -122,13 +122,13 @@ wss.on("connection", (ws, request) => {
       } else {
         log(`Got WS request for job ${job.msg} with id ${id}, queued in position ${queue.indexOf(id)}`, job.num);
       }
-    } else if (opcode == Tcancel) {
+    } else if (opcode === Tcancel) {
       delete queue[queue.indexOf(req) - 1];
       jobs.delete(req);
       const cancelResponse = Buffer.concat([Buffer.from([Rcancel]), tag]);
       ws.send(cancelResponse);
-    } else if (opcode == Twait) {
-      const id = msg.readUInt32LE(3);
+    } else if (opcode === Twait) {
+      const id = msg.readBigUInt64LE(3);
       const job = jobs.get(id);
       if (!job) {
         const errorResponse = Buffer.concat([Buffer.from([Rerror]), tag, Buffer.from("Invalid job ID")]);
@@ -178,7 +178,7 @@ httpServer.on("request", async (req, res) => {
       res.statusCode = 400;
       return res.end("400 Bad Request");
     }
-    const id = parseInt(reqUrl.searchParams.get("id"));
+    const id = BigInt(reqUrl.searchParams.get("id"));
     if (!jobs.has(id)) {
       res.statusCode = 410;
       return res.end("410 Gone");
@@ -206,6 +206,11 @@ httpServer.on("request", async (req, res) => {
     const data = jobs.get(id).data;
     jobs.delete(id);
     return res.end(data, (err) => {
+      if (err) error(err);
+    });
+  } else if (reqUrl.pathname === "/count" && req.method === "GET") {
+    log(`Sending job count to ${req.socket.remoteAddress}:${req.socket.remotePort} via HTTP`);
+    return res.end(jobAmount.toString(), (err) => {
       if (err) error(err);
     });
   } else {

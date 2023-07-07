@@ -1,43 +1,19 @@
 import Command from "./command.js";
 import imageDetect from "../utils/imagedetect.js";
+import { runImageJob } from "../utils/image.js";
 import { runningCommands } from "../utils/collections.js";
 import { readFileSync } from "fs";
-const { emotes } = JSON.parse(readFileSync(new URL("../messages.json", import.meta.url)));
+const { emotes } = JSON.parse(readFileSync(new URL("../config/messages.json", import.meta.url)));
 import { random } from "../utils/misc.js";
+import { selectedImages } from "../utils/collections.js";
 
 class ImageCommand extends Command {
-  /*this.embed = {
-      "title": "Your image is being generated! (PRELIMINARY EMBED)",
-      "description": "The current progress is outlined below:",
-      "color": 16711680,
-      "footer": {
-        "text": "Step 2/3"
-      },
-      "author": {
-        "name": "Processing...",
-        "icon_url": "https://cdn.discordapp.com/avatars/429305856241172480/a20f739886ae47cfb10fa069416e8ed3.jpg"
-      },
-      "fields": [
-        {
-          "name": "Downloading...",
-          "value": "✅ Done!"
-        },
-        {
-          "name": "Processing...",
-          "value": "<a:processing:818243325891051581> In progress"
-        },
-        {
-          "name": "Uploading...",
-          "value": "<a:processing:818243325891051581> Waiting for previous steps to complete"
-        }
-      ]
-    };*/
-
   async criteria() {
     return true;
   }
 
   async run() {
+    this.success = false;
     const timestamp = this.type === "classic" ? this.message.createdAt : Math.floor((this.interaction.id / 4194304) + 1420070400000);
     // check if this command has already been run in this channel with the same arguments, and we are awaiting its result
     // if so, don't re-run it
@@ -47,28 +23,45 @@ class ImageCommand extends Command {
     // before awaiting the command result, add this command to the set of running commands
     runningCommands.set(this.author.id, timestamp);
 
-    const magickParams = {
+    const imageParams = {
       cmd: this.constructor.command,
-      params: {}
+      params: {
+        togif: !!this.options.togif
+      },
+      id: (this.interaction ?? this.message).id
     };
+
+    if (this.type === "application") await this.acknowledge();
 
     if (this.constructor.requiresImage) {
       try {
-        const image = await imageDetect(this.client, this.message, this.interaction, this.options, true);
+        const selection = selectedImages.get(this.author.id);
+        const image = selection ?? await imageDetect(this.client, this.message, this.interaction, this.options, true).catch(e => {
+          if (e === "Timed out") {
+            return { type: "timeout" };
+          } else {
+            throw e;
+          }
+        });
+        if (selection) selectedImages.delete(this.author.id);
         if (image === undefined) {
           runningCommands.delete(this.author.id);
-          return this.constructor.noImage;
+          return `${this.constructor.noImage} (Tip: try right-clicking/holding on a message and press Apps -> Select Image, then try again.)`;
         } else if (image.type === "large") {
           runningCommands.delete(this.author.id);
-          return "That image is too large (>= 25MB)! Try using a smaller image.";
+          return "That image is too large (>= 40MB)! Try using a smaller image.";
         } else if (image.type === "tenorlimit") {
           runningCommands.delete(this.author.id);
           return "I've been rate-limited by Tenor. Please try uploading your GIF elsewhere.";
+        } else if (image.type === "timeout") {
+          runningCommands.delete(this.author.id);
+          return "The request to get that image timed out. Please try again or use another image.";
         }
-        magickParams.path = image.path;
-        magickParams.params.type = image.type;
-        magickParams.url = image.url; // technically not required but can be useful for text filtering
-        if (this.constructor.requiresGIF) magickParams.onlyGIF = true;
+        imageParams.path = image.path;
+        imageParams.params.type = image.type;
+        imageParams.url = image.url; // technically not required but can be useful for text filtering
+        imageParams.name = image.name;
+        if (this.constructor.requiresGIF) imageParams.onlyGIF = true;
       } catch (e) {
         runningCommands.delete(this.author.id);
         throw e;
@@ -76,34 +69,31 @@ class ImageCommand extends Command {
     }
 
     if (this.constructor.requiresText) {
-      const text = this.options.text ?? this.args;
-      if (text.length === 0 || !await this.criteria(text)) {
+      const text = this.options.text ?? this.args.join(" ").trim();
+      if (text.length === 0 || !await this.criteria(text, imageParams.url)) {
         runningCommands.delete(this.author.id);
         return this.constructor.noText;
       }
     }
 
-    switch (typeof this.params) {
-      case "function":
-        Object.assign(magickParams.params, this.params(magickParams.url));
-        break;
-      case "object":
-        Object.assign(magickParams.params, this.params);
-        break;
+    if (typeof this.params === "function") {
+      Object.assign(imageParams.params, this.params(imageParams.url, imageParams.name));
+    } else if (typeof this.params === "object") {
+      Object.assign(imageParams.params, this.params);
     }
 
     let status;
-    if (magickParams.params.type === "image/gif" && this.type === "classic") {
-      status = await this.processMessage(this.message);
-    } else {
-      await this.acknowledge();
+    if (imageParams.params.type === "image/gif" && this.type === "classic") {
+      status = await this.processMessage(this.message.channel ?? await this.client.rest.channels.get(this.message.channelID));
     }
 
     try {
-      const { buffer, type } = await this.ipc.serviceCommand("image", { type: "run", obj: magickParams }, true, 9000000);
+      const { buffer, type } = await runImageJob(imageParams);
+      if (type === "nocmd") return "That command isn't supported on this instance of esmBot.";
       if (type === "nogif" && this.constructor.requiresGIF) return "That isn't a GIF!";
+      this.success = true;
       return {
-        file: Buffer.from(buffer.data),
+        contents: buffer,
         name: `${this.constructor.command}.${type}`
       };
     } catch (e) {
@@ -112,14 +102,20 @@ class ImageCommand extends Command {
       if (e === "No available servers") return "I can't seem to contact the image servers, they might be down or still trying to start up. Please wait a little bit.";
       throw e;
     } finally {
-      if (status && (status.channel.messages ? status.channel.messages.has(status.id) : await this.client.getMessage(status.channel.id, status.id).catch(() => undefined))) await status.delete();
+      try {
+        if (status) await status.delete();
+      } catch {
+        // no-op
+      }
       runningCommands.delete(this.author.id);
     }
 
   }
 
-  processMessage(message) {
-    return this.client.createMessage(message.channel.id, `${random(emotes) || process.env.PROCESSING_EMOJI || "<a:processing:479351417102925854>"} Processing... This might take a while`);
+  processMessage(channel) {
+    return channel.createMessage({
+      content: `${random(emotes) || process.env.PROCESSING_EMOJI || "<a:processing:479351417102925854>"} Processing... This might take a while`
+    });
   }
 
   static init() {
@@ -143,8 +139,15 @@ class ImageCommand extends Command {
         description: "An image/GIF URL"
       });
     }
+    this.flags.push({
+      name: "togif",
+      type: 5,
+      description: "Force GIF output"
+    });
     return this;
   }
+
+  static allowedFonts = ["futura", "impact", "helvetica", "arial", "roboto", "noto", "times", "comic sans ms"];
 
   static requiresImage = true;
   static requiresText = false;

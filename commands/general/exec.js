@@ -7,7 +7,10 @@ import Command from "../../classes/command.js";
 class ExecCommand extends Command {
   async run() {
     const owners = process.env.OWNER.split(",");
-    if (!owners.includes(this.author.id)) return "Only the bot owner can use exec!";
+    if (!owners.includes(this.author.id)) {
+      this.success = false;
+      return "Only the bot owner can use exec!";
+    }
     await this.acknowledge();
     const code = this.options.cmd ?? this.args.join(" ");
     try {
@@ -17,9 +20,11 @@ class ExecCommand extends Command {
       const sendString = `\`\`\`bash\n${cleaned}\n\`\`\``;
       if (sendString.length >= 2000) {
         return {
-          text: "The result was too large, so here it is as a file:",
-          file: cleaned,
-          name: "result.txt"
+          content: "The result was too large, so here it is as a file:",
+          files: [{
+            contents: cleaned,
+            name: "result.txt"
+          }]
         };
       } else {
         return sendString;
@@ -39,6 +44,7 @@ class ExecCommand extends Command {
   static description = "Executes a shell command";
   static aliases = ["runcmd"];
   static arguments = ["[command]"];
+  static adminOnly = true;
 }
 
 export default ExecCommand;
